@@ -38,6 +38,12 @@ class GraphEngine:
     def __init__(self) -> None:
         self.G = nx.DiGraph()
 
+    def copy(self) -> "GraphEngine":
+        """Copia independiente (para cálculos en otro hilo mientras el original sigue cambiando)."""
+        other = GraphEngine()
+        other.G = self.G.copy()
+        return other
+
     # ------------------------------------------------------------------ mantenimiento
     def rebuild(self, sections: Iterable[Section], relations: Iterable[Relation]) -> None:
         self.G.clear()

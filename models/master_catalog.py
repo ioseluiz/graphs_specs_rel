@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, replace
+from functools import cached_property
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -73,8 +74,9 @@ class CatalogRecord:
     def label(self) -> str:
         return f"{self.code} - {self.title}" if self.title else self.code
 
-    @property
+    @cached_property
     def search(self) -> str:
+        """Texto de búsqueda normalizado; se calcula una sola vez por registro (antes, en cada tecla)."""
         return f"{self.code_key.lower()} {search_key(self.code)} {search_key(self.title_en)} {search_key(self.title_es or '')}"
 
 
@@ -710,13 +712,22 @@ class MasterCatalog:
             pass
 
     # ------------------------------------------------------------------ reemplazo por el usuario
-    def replace_from_file(self, source: Path) -> int:
+    @staticmethod
+    def build_user_catalog_file(source: Path, target: Path | None = None) -> tuple[Path, int]:
+        """Lee, limpia, clasifica y escribe la copia del usuario. Función pura: apta para un hilo.
+
+        Devuelve (ruta escrita, número de secciones). No toca la instancia: llamar después a `load`.
+        """
         rows = load_source_rows(source)
         records = classify(build_records(rows), load_category_rules())
         if len(records) < 10:
             raise MasterCatalogError("El archivo tiene muy pocas secciones válidas para ser un catálogo.")
-        target = user_catalog_path()
+        target = target if target is not None else user_catalog_path()
         count = write_catalog_sqlite(records, target, {"source": source.name, "edition": "usuario"})
+        return target, count
+
+    def replace_from_file(self, source: Path) -> int:
+        target, count = self.build_user_catalog_file(source)
         self.load(target)
         return count
 

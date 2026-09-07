@@ -11,7 +11,7 @@ import csv
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from models.entities import RelationKind, UiKind
 from models.relation_normalizer import (
@@ -347,9 +347,32 @@ def KEEP_STATUS(model: "ProjectModel", section) -> int | None:  # noqa: N802
     return section.status_id
 
 
-def apply_tables(model: "ProjectModel", tables: Tables) -> ImportSummary:
-    """Crea/actualiza secciones y relaciones en el proyecto abierto. Nunca borra nada."""
+ProgressFn = Callable[[int, int], None]  # (filas procesadas, total) -> None
+
+
+def apply_tables(model: "ProjectModel", tables: Tables, progress: ProgressFn | None = None) -> ImportSummary:
+    """Crea/actualiza secciones y relaciones en el proyecto abierto. Nunca borra nada.
+
+    Todo se escribe en una sola transacción (`model.bulk()`); `progress` se invoca cada pocas filas
+    para que la interfaz pueda mostrar el avance.
+    """
+    bulk = getattr(model, "bulk", None)
+    if bulk is None:
+        return _apply_tables(model, tables, progress)
+    with bulk():
+        return _apply_tables(model, tables, progress)
+
+
+def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn | None = None) -> ImportSummary:
     summary = ImportSummary()
+    total = len(tables.sections) + len(tables.relations)
+    done = 0
+
+    def tick() -> None:
+        nonlocal done
+        done += 1
+        if on_progress is not None and (done % 10 == 0 or done == total):
+            on_progress(done, total)
 
     def resolve_category(name: str, code: str = "") -> int | None:
         name = (name or "").strip()
@@ -405,6 +428,7 @@ def apply_tables(model: "ProjectModel", tables: Tables) -> ImportSummary:
         return max(0, min(100, int(round(value))))
 
     for i, row in enumerate(tables.sections, start=2):
+        tick()
         raw_code = row.get("code", "")
         code, inline_title = split_code_title(raw_code)
         title = row.get("title", "").strip() or inline_title
@@ -451,6 +475,7 @@ def apply_tables(model: "ProjectModel", tables: Tables) -> ImportSummary:
                     summary.sections_updated += 1
 
     for i, row in enumerate(tables.relations, start=2):
+        tick()
         a_text, b_text = row.get("a", ""), row.get("b", "")
         if not a_text.strip() or not b_text.strip():
             summary.errors.append(f"Relaciones fila {i}: falta Sección A o Sección B.")

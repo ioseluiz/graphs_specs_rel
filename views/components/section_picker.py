@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QModelIndex, Qt, pyqtSignal
+from PyQt6.QtCore import QModelIndex, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QCompleter, QLineEdit, QListView
 
 from models.master_catalog import normalize_code
@@ -24,6 +24,7 @@ from models.section_completer_model import (
 from views.components.delegates import TwoLineSectionDelegate
 
 PickerValue = int | tuple[str, str] | None
+FILTER_DELAY_MS = 90
 
 
 class SectionPicker(QLineEdit):
@@ -52,6 +53,12 @@ class SectionPicker(QLineEdit):
         self._completer.setPopup(popup)
         self.setCompleter(self._completer)
         self._completer.activated[QModelIndex].connect(self._on_activated)
+        # El filtrado se difiere unos milisegundos: al escribir rápido se filtra una vez por ráfaga,
+        # no por cada tecla (el catálogo tiene ~8.800 entradas).
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(FILTER_DELAY_MS)
+        self._filter_timer.timeout.connect(self._apply_filter)
         self.textEdited.connect(self._on_text_edited)
         popup.installEventFilter(self)  # Enter con el popup abierto: elegir coincidencia exacta / única
         self._update_state()
@@ -119,12 +126,26 @@ class SectionPicker(QLineEdit):
 
     def _on_text_edited(self, text: str) -> None:
         self._chosen_id = self._chosen_key = None
-        self._proxy.set_query(text)
         self._update_state()
         if text.strip():
-            self._completer.complete()
+            self._filter_timer.start()
         else:
+            self._filter_timer.stop()
+            self._proxy.set_query("")
             self._completer.popup().hide()
+
+    def _apply_filter(self) -> None:
+        text = self.text()
+        if not text.strip():
+            return
+        self._proxy.set_query(text)
+        self._completer.complete()
+
+    def flush_filter(self) -> None:
+        """Aplica ya el filtro pendiente (Enter, pruebas)."""
+        if self._filter_timer.isActive():
+            self._filter_timer.stop()
+            self._apply_filter()
 
     def _on_activated(self, index: QModelIndex) -> None:
         kind = index.data(ROLE_KIND)
@@ -140,6 +161,9 @@ class SectionPicker(QLineEdit):
         self.entryActivated.emit()
 
     def _handle_return(self) -> None:
+        if self._filter_timer.isActive():
+            self._filter_timer.stop()
+            self._proxy.set_query(self.text())  # sin abrir el popup: se decide abajo
         popup = self._completer.popup()
         current = popup.currentIndex() if popup.isVisible() else QModelIndex()
         if current.isValid():

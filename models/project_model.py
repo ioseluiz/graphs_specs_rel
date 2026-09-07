@@ -6,8 +6,10 @@ con ids. Las vistas nunca mutan el modelo en respuesta a una señal del modelo.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
@@ -208,6 +210,35 @@ class ProjectModel(QObject):
             self.db.touch()
         return self.path
 
+    @contextmanager
+    def bulk(self) -> Iterator[None]:
+        """Agrupa muchas mutaciones (importación, reclasificación) en UNA transacción SQLite.
+
+        Las señales por elemento se emiten igual que siempre; los oyentes pesados ya coalescen.
+        Sin esto, 300 filas importadas eran 300 transacciones (fsync cada una, más lento en OneDrive).
+        """
+        assert self.db is not None
+        with self.db.transaction():
+            yield
+
+    def snapshot(self) -> "ProjectSnapshot":
+        """Copia de solo lectura del estado, para exportadores que corren en otro hilo.
+
+        El hilo de trabajo no debe tocar `ProjectModel` (SQLite exige el hilo que abrió la conexión).
+        """
+        return ProjectSnapshot(
+            path=self.path,
+            _meta=self.meta(),
+            _sections=dict(self._sections),
+            _relations=dict(self._relations),
+            _categories=dict(self._categories),
+            _statuses=dict(self._statuses),
+            _responsibles=dict(self._responsibles),
+            _section_responsibles={k: list(v) for k, v in self._section_responsibles.items()},
+            _positions=dict(self._positions),
+            graph=self.graph.copy(),
+        )
+
     # ------------------------------------------------------------------ lectura
     def meta(self) -> ProjectMeta:
         return self.project_repo.get() if self.db else ProjectMeta()
@@ -356,9 +387,10 @@ class ProjectModel(QObject):
             if cat is None or cat.id == section.category_id:
                 continue
             changes.append((section, cat))
-        if apply:
-            for section, cat in changes:
-                self.update_section(section.id, section.code, section.title, cat.id, section.notes)
+        if apply and changes:
+            with self.bulk():
+                for section, cat in changes:
+                    self.update_section(section.id, section.code, section.title, cat.id, section.notes)
         return changes
 
     def setting(self, key: str, default: str | None = None) -> str | None:
@@ -758,3 +790,68 @@ class ProjectModel(QObject):
     # ------------------------------------------------------------------ interno
     def _schedule_graph_changed(self) -> None:
         self._graph_timer.start()
+
+
+@dataclass
+class ProjectSnapshot:
+    """Vista inmutable del proyecto con la misma API de lectura que usan los exportadores."""
+
+    path: Path | None
+    _meta: ProjectMeta
+    _sections: dict[int, Section]
+    _relations: dict[int, Relation]
+    _categories: dict[int, Category]
+    _statuses: dict[int, Status]
+    _responsibles: dict[int, Responsible]
+    _section_responsibles: dict[int, list[int]]
+    _positions: dict[int, NodePosition] = field(default_factory=dict)
+    graph: GraphEngine = field(default_factory=GraphEngine)
+
+    is_open = True
+
+    def meta(self) -> ProjectMeta:
+        return self._meta
+
+    def sections(self) -> list[Section]:
+        return sorted(self._sections.values(), key=lambda s: s.code_key)
+
+    def section(self, section_id: int) -> Section | None:
+        return self._sections.get(section_id)
+
+    def relations(self) -> list[Relation]:
+        return list(self._relations.values())
+
+    def relations_for(self, section_id: int) -> list[Relation]:
+        return [r for r in self._relations.values() if r.touches(section_id)]
+
+    def categories(self) -> list[Category]:
+        return sorted(self._categories.values(), key=lambda c: (c.sort_order, c.name))
+
+    def category(self, category_id: int | None) -> Category | None:
+        return self._categories.get(category_id) if category_id is not None else None
+
+    def statuses(self) -> list[Status]:
+        return sorted(self._statuses.values(), key=lambda s: (s.sort_order, s.name))
+
+    def status(self, status_id: int | None) -> Status | None:
+        return self._statuses.get(status_id) if status_id is not None else None
+
+    def responsibles(self) -> list[Responsible]:
+        return sorted(self._responsibles.values(), key=lambda r: (r.sort_order, r.code))
+
+    def section_responsible_ids(self, section_id: int) -> list[int]:
+        return [rid for rid in self._section_responsibles.get(section_id, []) if rid in self._responsibles]
+
+    def section_responsibles(self, section_id: int) -> list[Responsible]:
+        return [self._responsibles[rid] for rid in self.section_responsible_ids(section_id)]
+
+    def position(self, section_id: int) -> NodePosition | None:
+        return self._positions.get(section_id)
+
+    def section_colors(self, section: Section) -> tuple[str, str]:
+        if section.fill_color:
+            return section.fill_color, section.border_color or derive_border_color(section.fill_color)
+        cat = self.category(section.category_id)
+        if cat is not None:
+            return cat.fill_color, cat.border_color
+        return palette.SURFACE_ALT, palette.BORDER_STRONG

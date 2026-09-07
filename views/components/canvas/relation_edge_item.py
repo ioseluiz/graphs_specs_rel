@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QPolygonF
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyleOptionGraphicsItem, QWidget
 
@@ -53,6 +53,8 @@ class RelationEdgeItem(QGraphicsPathItem):
         self._dimmed = False
         self._highlight = False
         self._handles: list[WaypointHandleItem] = []
+        self._shape = QPainterPath()
+        self._bounds = QRectF()
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.setZValue(0)
@@ -115,6 +117,11 @@ class RelationEdgeItem(QGraphicsPathItem):
             path.moveTo(pts[0])
             for p in pts[1:]:
                 path.lineTo(p)
+        # shape()/boundingRect() se consultan en cada repintado, selección y hover: se calculan una vez aquí.
+        stroker = QPainterPathStroker()
+        stroker.setWidth(10)
+        self._shape = stroker.createStroke(path)
+        self._bounds = self._shape.controlPointRect().adjusted(-ARROW_LEN, -ARROW_LEN, ARROW_LEN, ARROW_LEN)
         self.setPath(path)
         self._arrows = []
         if len(pts) >= 2:
@@ -135,12 +142,10 @@ class RelationEdgeItem(QGraphicsPathItem):
         return QPolygonF([tip, left, right])
 
     def shape(self) -> QPainterPath:
-        stroker = QPainterPathStroker()
-        stroker.setWidth(10)
-        return stroker.createStroke(self.path())
+        return self._shape
 
-    def boundingRect(self):  # type: ignore[override]
-        return self.shape().controlPointRect().adjusted(-ARROW_LEN, -ARROW_LEN, ARROW_LEN, ARROW_LEN)
+    def boundingRect(self) -> QRectF:  # type: ignore[override]
+        return self._bounds
 
     # ------------------------------------------------------------------ waypoints
     def show_handles(self, on: bool) -> None:

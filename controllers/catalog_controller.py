@@ -11,6 +11,8 @@ from config.settings import SETTINGS_LAST_DIR
 from models.master_catalog import MasterCatalogError
 from models.masterformat_tree_model import MasterFormatTreeModel
 from models.project_model import ProjectModel
+from utils.debounce import Debouncer
+from utils.workers import run_with_progress
 from views.main_window import TAB_MAP, MainWindow
 
 
@@ -42,11 +44,13 @@ class CatalogController(QObject):
         window.act_add_catalog_entry.triggered.connect(lambda: self.add_entry(""))
         window.act_clear_catalog_edits.triggered.connect(self.clear_all_edits)
 
+        # Coalescido: marcar en el árbol las secciones del proyecto una vez por ráfaga de cambios.
+        self.refresh_keys_later = Debouncer(self._refresh_project_keys, 50, self)
         for sig in (project.projectLoaded, project.projectClosed):
             sig.connect(self._refresh_project_keys)
             sig.connect(self._refresh_categories)
         for sig in (project.sectionAdded, project.sectionUpdated, project.sectionRemoved):
-            sig.connect(lambda _sid: self._refresh_project_keys())
+            sig.connect(self.refresh_keys_later)
         project.categoriesChanged.connect(self._refresh_categories)
         self._refresh_project_keys()
         self._refresh_categories()
@@ -54,6 +58,7 @@ class CatalogController(QObject):
 
     # ------------------------------------------------------------------ estado
     def _refresh_project_keys(self) -> None:
+        self.refresh_keys_later.cancel()
         self.tree_model.set_project_keys({s.code_key for s in self.project.sections()})
 
     def _refresh_categories(self) -> None:
@@ -270,16 +275,26 @@ class CatalogController(QObject):
             "Excel, CSV o SQLite (*.xlsx *.xlsm *.csv *.sqlite *.db);;Todos los archivos (*)")
         if not path:
             return
+        settings.setValue(SETTINGS_LAST_DIR, str(Path(path).parent))
+        # Leer, limpiar y clasificar miles de filas tarda varios segundos: en segundo plano.
+        run_with_progress(self.window, "Catálogo MasterFormat", "Leyendo y clasificando el catálogo…",
+                          self.project.master.build_user_catalog_file, Path(path),
+                          on_done=self._on_catalog_built, on_error=self._on_catalog_build_failed)
+
+    def _on_catalog_built(self, result: tuple[Path, int]) -> None:
+        target, count = result
         try:
-            count = self.project.master.replace_from_file(Path(path))
+            self.project.master.load(target)  # hilo principal: el catálogo lo comparten todas las vistas
         except MasterCatalogError as exc:
             QMessageBox.critical(self.window, "Catálogo MasterFormat", str(exc))
             return
-        settings.setValue(SETTINGS_LAST_DIR, str(Path(path).parent))
         self._after_catalog_change()
         QMessageBox.information(self.window, "Catálogo MasterFormat",
                                 f"Catálogo reemplazado: {count} secciones.\nSe guardó una copia en su perfil "
                                 "de usuario y se usará en todos los proyectos.")
+
+    def _on_catalog_build_failed(self, exc: BaseException, _tb: str) -> None:
+        QMessageBox.critical(self.window, "Catálogo MasterFormat", str(exc))
 
     def reset_catalog(self) -> None:
         answer = QMessageBox.question(self.window, "Restaurar catálogo",

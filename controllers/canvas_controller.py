@@ -9,6 +9,8 @@ from config import palette
 from models.entities import SIDES, RelationKind, Section, UiKind
 from models.layout_engine import initial_layout_2d
 from models.project_model import ProjectModel
+from utils.debounce import Debouncer
+from utils.workers import busy_cursor
 from views.components.section_editor_dialog import SectionEditorDialog
 from views.main_window import TAB_ANALYSIS, TAB_MAP, MainWindow
 
@@ -38,9 +40,10 @@ class CanvasController(QObject):
         project.relationGeometryChanged.connect(self._on_relation_geometry)
         project.relationRemoved.connect(self.scene.remove_edge)
         project.positionChanged.connect(self.scene.set_node_pos)
-        project.categoriesChanged.connect(self._refresh_all_nodes)
-        project.statusesChanged.connect(self._refresh_all_nodes)
-        project.responsiblesChanged.connect(self._refresh_all_nodes)
+        self._refresh_all_later = Debouncer(self._refresh_all_nodes, 50, self)
+        project.categoriesChanged.connect(self._refresh_all_later)
+        project.statusesChanged.connect(self._refresh_all_later)
+        project.responsiblesChanged.connect(self._refresh_all_later)
 
         # Escena -> modelo
         self.scene.nodesMoved.connect(self._on_nodes_moved)
@@ -76,14 +79,15 @@ class CanvasController(QObject):
 
     # ------------------------------------------------------------------ carga
     def populate(self) -> None:
-        self.scene.clear_all()
-        for section in self.project.sections():
-            self._add_node(section)
-        for rel in self.project.relations():
-            self.scene.add_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
-                                rel.source_port, rel.target_port)
-        self.scene.grow_scene_rect()
-        self.view.fit_all()
+        with busy_cursor():
+            self.scene.clear_all()
+            for section in self.project.sections():
+                self._add_node(section)
+            for rel in self.project.relations():
+                self.scene.add_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
+                                    rel.source_port, rel.target_port)
+            self.scene.grow_scene_rect()
+            self.view.fit_all()
 
     def _node_style(self, section: Section) -> tuple[str, str]:
         return self.project.section_colors(section)
@@ -207,6 +211,7 @@ class CanvasController(QObject):
 
     def _set_grid(self, on: bool) -> None:
         self.scene.grid_visible = on
+        self.view.resetCachedContent()  # el fondo (rejilla) está cacheado en la vista
         self.scene.update()
 
     def new_section(self, scene_pos: QPointF | None) -> None:

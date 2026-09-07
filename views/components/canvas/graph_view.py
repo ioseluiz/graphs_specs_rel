@@ -31,6 +31,8 @@ class GraphView(QGraphicsView):
             | QPainter.RenderHint.SmoothPixmapTransform
         )
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
+        # La rejilla del fondo se dibuja línea a línea: cachearla evita redibujarla en cada paneo.
+        self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)

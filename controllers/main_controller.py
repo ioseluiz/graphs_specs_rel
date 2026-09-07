@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QSettings
-from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 
 from config.settings import (
     APP_DISPLAY_NAME,
@@ -41,6 +41,8 @@ from models.project_io import (
 from models.project_model import ProjectModel
 from models.relations_table_model import RelationsTableModel
 from models.section_completer_model import SectionCompleterModel
+from utils.debounce import Debouncer
+from utils.workers import busy_cursor, progress_dialog, run_with_progress
 from views.components.categories_dialog import CategoriesDialog
 from views.components.import_catalog_dialog import ImportCatalogDialog
 from views.main_window import MainWindow
@@ -55,6 +57,10 @@ class MainController(QObject):
         self.table_model = table_model
         self.completer_model = completer_model
         self.settings = QSettings()
+        # Reconstruir el autocompletado (~30 ms con el catálogo completo) una vez por ráfaga de cambios,
+        # no una vez por cada sección importada.
+        self.rebuild_completer_later = Debouncer(self._rebuild_completer, 50, self)
+        self._onedrive_hint_shown = False
 
         self.relations = RelationsController(project, window, table_model, self)
         self.canvas = CanvasController(project, window, self.relations, self)
@@ -63,7 +69,7 @@ class MainController(QObject):
         self.export = ExportController(window, self)
         self.export.project = project
         self.catalog = CatalogController(project, window, window.catalog_tree_model,
-                                         lambda: self.completer_model.rebuild(self.project), self)
+                                         self.rebuild_completer_later, self)
         self.sections = SectionsController(project, window, self.canvas, self)
         self.help = HelpController(window, self)
 
@@ -93,10 +99,9 @@ class MainController(QObject):
         project.projectLoaded.connect(self._on_project_loaded)
         project.projectClosed.connect(self._on_project_closed)
         project.projectMetaChanged.connect(self._refresh_header)
-        for sig in (project.sectionAdded, project.sectionUpdated, project.sectionRemoved):
-            sig.connect(lambda _sid: self.completer_model.rebuild(self.project))
-        project.categoriesChanged.connect(lambda: self.completer_model.rebuild(self.project))
-        project.catalogChanged.connect(lambda: self.completer_model.rebuild(self.project))
+        for sig in (project.sectionAdded, project.sectionUpdated, project.sectionRemoved,
+                    project.categoriesChanged, project.catalogChanged):
+            sig.connect(self.rebuild_completer_later)
 
         self._restore_window_state()
         self._refresh_recent()
@@ -155,10 +160,14 @@ class MainController(QObject):
         if path:
             self.open_project(path)
 
+    def _rebuild_completer(self) -> None:
+        self.completer_model.rebuild(self.project)
+
     def open_project(self, path: str) -> None:
         p = Path(path)
         try:
-            self.project.open_project(p)
+            with busy_cursor():
+                self.project.open_project(p)
         except ProjectLockedError as exc:
             retry = QMessageBox.question(
                 self.window, "Archivo bloqueado", f"{exc}\n\n¿Reintentar?",
@@ -174,6 +183,17 @@ class MainController(QObject):
             return
         self.settings.setValue(SETTINGS_LAST_DIR, str(p.parent))
         self._push_recent(p)
+        self._maybe_warn_onedrive(p)
+
+    def _maybe_warn_onedrive(self, p: Path) -> None:
+        """Aviso único por sesión: OneDrive puede bloquear el archivo y detener la app unos segundos."""
+        if self._onedrive_hint_shown or "onedrive" not in str(p).lower():
+            return
+        self._onedrive_hint_shown = True
+        self.window.show_status(
+            "Este proyecto está en una carpeta de OneDrive: si la sincronización bloquea el archivo, un cambio "
+            "puede tardar en guardarse. Recomendado: clic derecho al archivo → «Mantener siempre en este "
+            "dispositivo», o trabajar en una carpeta local.", 15000)
 
     def _mark_saved(self) -> None:
         if self.project.is_open:
@@ -222,6 +242,7 @@ class MainController(QObject):
         self.project.close()
 
     def _on_project_loaded(self) -> None:
+        self.rebuild_completer_later.cancel()
         self.completer_model.rebuild(self.project)
         self._refresh_header()
         self.window.set_project_open(True)
@@ -233,6 +254,7 @@ class MainController(QObject):
                                 "Los cambios se guardan automáticamente.")
 
     def _on_project_closed(self) -> None:
+        self.rebuild_completer_later.cancel()
         self.completer_model.set_entries([])
         self.window.set_project_open(False)
         self.window.setWindowTitle(APP_DISPLAY_NAME)
@@ -334,10 +356,20 @@ class MainController(QObject):
             "Excel o CSV (*.xlsx *.xlsm *.csv);;Todos los archivos (*)")
         if not paths:
             return
-        try:
-            tables = read_tables([Path(p) for p in paths])
-        except ProjectIOError as exc:
+        files = [Path(p) for p in paths]
+        # Leer el Excel (openpyxl puede tardar segundos en libros grandes) sin bloquear la ventana.
+        run_with_progress(self.window, "Importar tablas", "Leyendo el archivo…", read_tables, files,
+                          on_done=lambda tables: self._confirm_and_apply_tables(tables, files),
+                          on_error=self._on_import_read_failed)
+
+    def _on_import_read_failed(self, exc: BaseException, _tb: str) -> None:
+        if isinstance(exc, ProjectIOError):
             QMessageBox.warning(self.window, "Importar tablas", str(exc))
+        else:
+            QMessageBox.critical(self.window, "Importar tablas", f"No se pudo leer el archivo:\n{exc}")
+
+    def _confirm_and_apply_tables(self, tables, files: list[Path]) -> None:
+        if not self.project.is_open:
             return
         n_sec, n_rel = len(tables.sections), len(tables.relations)
         answer = QMessageBox.question(
@@ -346,12 +378,39 @@ class MainController(QObject):
             "Las secciones existentes se actualizan y las nuevas se crean; nada se elimina. ¿Continuar?")
         if answer != QMessageBox.StandardButton.Yes:
             return
-        summary = apply_tables(self.project, tables)
-        self.settings.setValue(SETTINGS_LAST_DIR, str(Path(paths[0]).parent))
+        summary = self.apply_tables_with_progress(tables)
+        if summary is None:
+            return
+        self.settings.setValue(SETTINGS_LAST_DIR, str(files[0].parent))
         self.canvas.view.fit_all()
         QMessageBox.information(self.window, "Importación completada", summary.text())
         self.window.show_status(
             f"Importadas {summary.sections_created} secciones y {summary.relations_created} relaciones.", 8000)
+
+    def apply_tables_with_progress(self, tables):
+        """Aplica las tablas al modelo (hilo principal: muta el proyecto) mostrando el avance.
+
+        La escritura va en una sola transacción y los oyentes pesados están coalescidos, así que la
+        parte lenta que queda es crear los nodos del mapa; el diálogo se repinta cada pocas filas.
+        """
+        total = len(tables.sections) + len(tables.relations)
+        dialog = progress_dialog(self.window, "Importar tablas", "Creando secciones y relaciones…",
+                                 maximum=max(1, total), delay_ms=400)
+
+        def on_progress(done: int, count: int) -> None:
+            dialog.setValue(done)
+            dialog.setLabelText(f"Creando secciones y relaciones… {done} de {count}")
+            QApplication.processEvents()
+
+        try:
+            with busy_cursor():
+                return apply_tables(self.project, tables, progress=on_progress)
+        except ProjectFileError as exc:
+            QMessageBox.critical(self.window, "Importar tablas", str(exc))
+            return None
+        finally:
+            dialog.close()
+            dialog.deleteLater()
 
     def export_tables(self) -> None:
         if not self.project.is_open:
@@ -365,13 +424,16 @@ class MainController(QObject):
         p = Path(path)
         if p.suffix.lower() != ".xlsx":
             p = p.with_suffix(".xlsx")
-        try:
-            export_tables_xlsx(self.project, p)
-        except ProjectIOError as exc:
-            QMessageBox.critical(self.window, "Exportar tablas", str(exc))
-            return
         self.settings.setValue(SETTINGS_LAST_DIR, str(p.parent))
-        self.window.show_status(f"Tablas exportadas: {p}", 8000)
+        snapshot = self.project.snapshot()  # copia de solo lectura: el hilo no toca el modelo ni SQLite
+
+        def failed(exc: BaseException, _tb: str) -> None:
+            QMessageBox.critical(self.window, "Exportar tablas", str(exc))
+
+        run_with_progress(self.window, "Exportar tablas", "Generando el libro de Excel…",
+                          export_tables_xlsx, snapshot, p,
+                          on_done=lambda _r: self.window.show_status(f"Tablas exportadas: {p}", 8000),
+                          on_error=failed)
 
     # ------------------------------------------------------------------ varios
     def about(self) -> None:

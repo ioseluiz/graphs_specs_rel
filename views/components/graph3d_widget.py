@@ -21,6 +21,27 @@ from config import palette
 os.environ.setdefault("PYQTGRAPH_QT_LIB", "PyQt6")
 
 MAX_AUTO_LABELS = 15
+MAX_ALL_LABELS = 200   # «Mostrar todas las etiquetas»: cada GLTextItem cuesta; por encima se etiquetan las de mayor grado
+
+
+def choose_label_indices(degrees: list[int], show_all: bool, highlight_idx: set[int] | None,
+                         max_auto: int = MAX_AUTO_LABELS, max_all: int = MAX_ALL_LABELS) -> set[int]:
+    """Índices de nodos a etiquetar (función pura, probada aparte).
+
+    - Sin «todas»: las `max_auto` de mayor grado; con resaltado, solo las resaltadas (todas ellas).
+    - Con «todas»: todas si caben en `max_all`; si no, las `max_all` de mayor grado (más las resaltadas).
+    """
+    n = len(degrees)
+    order = sorted(range(n), key=lambda i: -degrees[i])
+    if show_all:
+        chosen = set(range(n)) if n <= max_all else set(order[:max_all])
+        if highlight_idx is not None:
+            chosen |= set(highlight_idx)
+        return chosen
+    chosen = set(order[:max_auto])
+    if highlight_idx is not None:
+        chosen = {i for i in chosen if i in highlight_idx} | set(highlight_idx)
+    return chosen
 
 
 def _rgba(hex_color: str, alpha: float) -> tuple[float, float, float, float]:
@@ -44,6 +65,7 @@ class Graph3DWidget(QWidget):
         self._gl_failed = False
         self._data: dict[str, Any] | None = None
         self._highlight: set[int] | None = None
+        self._status = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -156,10 +178,27 @@ class Graph3DWidget(QWidget):
             "ids": node_ids, "pos": positions, "fills": fills, "edges": edges,
             "mutual": mutual, "labels": labels, "degrees": degrees,
         }
-        self.info_label.setText(f"{len(node_ids)} secciones · {len(edges)} relaciones")
+        self._status = ""
+        self._update_info()
         self._render()
         if first_time:
             self.reset_camera()
+
+    def set_status(self, text: str) -> None:
+        """Mensaje transitorio en la barra de la vista (p. ej. «Calculando disposición 3D…»)."""
+        self._status = text
+        self._update_info()
+
+    def _update_info(self) -> None:
+        parts: list[str] = []
+        if self._data is not None:
+            n, e = len(self._data["ids"]), len(self._data["edges"])
+            parts.append(f"{n} secciones · {e} relaciones")
+            if self.labels_check.isChecked() and n > MAX_ALL_LABELS:
+                parts.append(f"etiquetas: las {MAX_ALL_LABELS} de mayor grado")
+        if getattr(self, "_status", ""):
+            parts.append(self._status)
+        self.info_label.setText(" · ".join(parts))
 
     def set_highlight(self, node_ids: set[int] | None) -> None:
         self._highlight = set(node_ids) if node_ids else None
@@ -235,6 +274,7 @@ class Graph3DWidget(QWidget):
 
     def _on_labels_toggled(self, on: bool) -> None:
         self.nodeLabelsToggled.emit(on)
+        self._update_info()
         self._render()
 
     # ------------------------------------------------------------------ exportación
@@ -243,15 +283,11 @@ class Graph3DWidget(QWidget):
         if not data:
             return set()
         ids = data["ids"]
-        if self.labels_check.isChecked():
-            return set(range(len(ids)))
-        order = sorted(range(len(ids)), key=lambda i: -data["degrees"][i])
-        chosen = set(order[:MAX_AUTO_LABELS])
+        highlight_idx = None
         if self._highlight is not None:
             index_of = {sid: i for i, sid in enumerate(ids)}
-            chosen = {i for i in chosen if ids[i] in self._highlight}
-            chosen |= {index_of[s] for s in self._highlight if s in index_of}
-        return chosen
+            highlight_idx = {index_of[s] for s in self._highlight if s in index_of}
+        return choose_label_indices(list(data["degrees"]), self.labels_check.isChecked(), highlight_idx)
 
     def render_image(self, scale: float = 2.0):
         """Imagen (QImage) de la vista 3D con la cámara actual, a `scale` veces la resolución."""

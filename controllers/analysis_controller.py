@@ -4,6 +4,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QObject
 
 from models.project_model import ProjectModel
+from utils.debounce import Debouncer
 from views.main_window import MainWindow
 
 
@@ -15,11 +16,13 @@ class AnalysisController(QObject):
         self.window = window
         self.canvas = canvas_controller
         self.panel = window.analysis
-        project.projectLoaded.connect(self.refresh)
-        project.projectClosed.connect(self.refresh)
-        project.graphChanged.connect(self.refresh)
-        project.sectionUpdated.connect(lambda _sid: self.refresh())
-        project.responsiblesChanged.connect(self.refresh)
+        # Coalescido: una importación de 300 secciones dispara cientos de señales; se refresca una vez.
+        self.refresh_later = Debouncer(self.refresh, 50, self)
+        project.projectLoaded.connect(self._on_project_state)
+        project.projectClosed.connect(self._on_project_state)
+        project.graphChanged.connect(self.refresh_later)
+        project.sectionUpdated.connect(self.refresh_later)
+        project.responsiblesChanged.connect(self.refresh_later)
         self.panel.centerOnSection.connect(self.canvas.center_on)
         self.panel.highlightRequested.connect(self.highlight)
         self.panel.clearHighlightRequested.connect(self.canvas.clear_highlight)
@@ -29,7 +32,12 @@ class AnalysisController(QObject):
         s = self.project.section(section_id)
         return s.label if s else f"#{section_id}"
 
+    def _on_project_state(self) -> None:
+        self.refresh_later.cancel()
+        self.refresh()
+
     def refresh(self) -> None:
+        self.refresh_later.cancel()
         if not self.project.is_open:
             self.panel.set_metrics(0, 0, 0, 0)
             self.panel.set_responsible_progress([])

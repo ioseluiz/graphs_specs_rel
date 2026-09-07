@@ -128,3 +128,14 @@ def place_new_node_3d(
         return cx + 1.5 * math.cos(ang), cy + 1.5 * math.sin(ang), cz + 0.8 * math.sin(ang * 0.5)
     ang = seed_index * 2.399
     return 11.0 * math.cos(ang), 11.0 * math.sin(ang), 0.0
+
+
+def warm_up() -> None:
+    """Importa scipy y ejecuta un spring layout mínimo.
+
+    La primera llamada a `nx.spring_layout` cuesta ~1 s (importación de scipy/numpy); hacerla en un
+    hilo al arrancar evita ese tirón al abrir la pestaña 3D por primera vez.
+    """
+    g = nx.path_graph(3)
+    layout3d(g, seed=1)
+    initial_layout_2d(g, seed=1)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ from config.settings import APP_VERSION
 from models.schema import MIGRATIONS, SCHEMA_SQL, SCHEMA_VERSION
 
 BACKUP_COPIES = 3
+BUSY_TIMEOUT_MS = 1500     # antes 5000: con OneDrive bloqueando, la interfaz esperaba 5 s por escritura
+LOCK_RETRY_DELAY = 0.3     # segundos entre el primer intento de BEGIN y el reintento
 
 
 class ProjectFileError(Exception):
@@ -39,7 +42,7 @@ class ProjectDatabase:
     def _connect(self) -> sqlite3.Connection:
         target = ":memory:" if self.path is None else str(self.path)
         try:
-            conn = sqlite3.connect(target, timeout=5.0, isolation_level=None)
+            conn = sqlite3.connect(target, timeout=BUSY_TIMEOUT_MS / 1000.0, isolation_level=None)
         except sqlite3.OperationalError as exc:
             raise ProjectFileError(f"No se pudo abrir el archivo: {exc}") from exc
         conn.row_factory = sqlite3.Row
@@ -48,11 +51,13 @@ class ProjectDatabase:
     def _configure(self) -> None:
         try:
             self.conn.execute("PRAGMA foreign_keys = ON")
-            self.conn.execute("PRAGMA busy_timeout = 5000")
+            self.conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
             if self.path is not None:
                 # DELETE en lugar de WAL: OneDrive no sincroniza bien -wal/-shm.
                 self.conn.execute("PRAGMA journal_mode = DELETE")
-                self.conn.execute("PRAGMA synchronous = FULL")
+                # NORMAL: seguro ante cierres de la aplicación (solo un corte de energía podría perder
+                # la última transacción) y evita un fsync extra por cada cambio.
+                self.conn.execute("PRAGMA synchronous = NORMAL")
         except sqlite3.DatabaseError as exc:
             self._raise_for(exc)
 
@@ -190,18 +195,38 @@ class ProjectDatabase:
                 self.conn.execute("RELEASE sp")
                 raise
             return
-        try:
-            self.conn.execute("BEGIN IMMEDIATE")
-        except sqlite3.OperationalError as exc:
-            self._raise_for(exc)
+        self._begin()
         try:
             yield self.conn
-            if self.conn.in_transaction:
-                self.conn.execute("COMMIT")
         except Exception:
+            self._rollback()
+            raise
+        if self.conn.in_transaction:
+            try:
+                self.conn.execute("COMMIT")
+            except sqlite3.OperationalError as exc:
+                self._rollback()
+                self._raise_for(exc)  # p. ej. "database is locked" -> ProjectLockedError
+
+    def _begin(self) -> None:
+        """BEGIN IMMEDIATE con un reintento breve si el archivo está bloqueado (OneDrive)."""
+        for attempt in range(2):
+            try:
+                self.conn.execute("BEGIN IMMEDIATE")
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if attempt == 0 and ("locked" in message or "busy" in message):
+                    time.sleep(LOCK_RETRY_DELAY)
+                    continue
+                self._raise_for(exc)
+
+    def _rollback(self) -> None:
+        try:
             if self.conn.in_transaction:
                 self.conn.execute("ROLLBACK")
-            raise
+        except sqlite3.Error:
+            pass
 
     def touch(self) -> None:
         self.conn.execute(

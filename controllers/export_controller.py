@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from config import palette
 from config.settings import APP_NAME, SETTINGS_LAST_DIR
+from utils.workers import busy_cursor, run_with_progress
 from views.components.canvas.graph_scene import GraphScene
 from views.components.graph3d_widget import Graph3DWidget
 from views.main_window import TAB_3D, MainWindow
@@ -191,29 +192,38 @@ class ExportController(QObject):
             grid = self.window.scene.grid_visible
             try:
                 self.window.scene.grid_visible = False
-                render_png(self.window.scene, map_png, scale=1.5)
+                with busy_cursor():
+                    render_png(self.window.scene, map_png, scale=1.5)  # QPainter: solo en el hilo principal
             except OSError:
                 map_png = None
             finally:
                 self.window.scene.grid_visible = grid
                 self.window.scene.update()
-        try:
-            stats = export_report_xlsx(project, path, map_png)
-        except ReportExportError as exc:
-            QMessageBox.critical(self.window, "Reporte de secciones", str(exc))
-            return
-        finally:
+        QSettings().setValue(SETTINGS_LAST_DIR, str(path.parent))
+        snapshot = project.snapshot()  # el hilo de trabajo no toca el modelo ni su conexión SQLite
+
+        def cleanup() -> None:
             if map_png is not None:
                 try:
                     map_png.unlink()
                 except OSError:
                     pass
-        QSettings().setValue(SETTINGS_LAST_DIR, str(path.parent))
-        self.window.show_status(
-            f"Reporte generado: {stats.sections} secciones, {stats.relations} relaciones, avance promedio "
-            f"{stats.avg_progress:.0f} % → {path}", 10000)
-        if open_after:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+        def done(stats) -> None:
+            cleanup()
+            self.window.show_status(
+                f"Reporte generado: {stats.sections} secciones, {stats.relations} relaciones, avance promedio "
+                f"{stats.avg_progress:.0f} % → {path}", 10000)
+            if open_after:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+        def failed(exc: BaseException, tb: str) -> None:
+            cleanup()
+            detail = str(exc) if isinstance(exc, ReportExportError) else f"{exc}\n\n{tb}"
+            QMessageBox.critical(self.window, "Reporte de secciones", detail)
+
+        run_with_progress(self.window, "Reporte de secciones", "Generando el reporte en Excel…",
+                          export_report_xlsx, snapshot, path, map_png, on_done=done, on_error=failed)
 
     # ------------------------------------------------------------------ utilidades
     def _ask_path(self, title: str, filter_: str, suffix: str, default_name: str) -> Path | None:

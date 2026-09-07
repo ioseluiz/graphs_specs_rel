@@ -154,7 +154,7 @@ def test_export_png_and_svg(app, tmp_path):
     assert png.stat().st_size > 0 and svg.stat().st_size > 0
 
 
-def test_export_3d_png_and_svg(app, tmp_path):
+def test_export_3d_png_and_svg(app, tmp_path, qtbot):
     from controllers.export_controller import render_3d_png, render_3d_svg
     from views.main_window import TAB_3D
 
@@ -165,6 +165,9 @@ def test_export_3d_png_and_svg(app, tmp_path):
     if not window.view3d.available:
         pytest.skip("OpenGL no disponible en este entorno")
     controller.view3d.refresh()
+    # La disposición se calcula en segundo plano la primera vez: esperar a que se renderice.
+    qtbot.waitUntil(lambda: window.view3d._data is not None and len(window.view3d._data["ids"]) == 3,
+                    timeout=60000)
     png, svg = tmp_path / "v3d.png", tmp_path / "v3d.svg"
     # El SVG es una proyección vectorial: no depende del framebuffer y debe funcionar siempre.
     render_3d_svg(window.view3d, svg)
@@ -336,7 +339,7 @@ def test_invert_and_kind_change_paths(app, qtbot):
     assert "→" in edge.toolTip() and "Clic derecho" in edge.toolTip()
 
 
-def test_export_report_action_generates_file(app, tmp_path, monkeypatch):
+def test_export_report_action_generates_file(app, tmp_path, monkeypatch, qtbot):
     from openpyxl import load_workbook
 
     import views.components.report_dialog as rd
@@ -359,6 +362,8 @@ def test_export_report_action_generates_file(app, tmp_path, monkeypatch):
 
     monkeypatch.setattr(rd, "ReportDialog", FakeDialog)
     window.act_export_report.trigger()
+    # El reporte se genera en un hilo de trabajo: esperar a que termine sin bloquear la interfaz.
+    qtbot.waitUntil(lambda: "Reporte generado" in window.statusBar().currentMessage(), timeout=30000)
     assert out.exists()
     wb = load_workbook(out)
     assert "Mapa" in wb.sheetnames and wb["Secciones"].max_row == 3
@@ -374,9 +379,10 @@ def test_toolbar_has_object_name_for_save_state(app):
 def test_completer_filters_by_code_and_title(app):
     from models.section_completer_model import ROLE_CODE, ROLE_KIND
 
-    project, window, _c, _t = app
+    project, window, controller, _t = app
     project.add_section("31 23 00", "Excavación")
     project.add_section("33 40 00", "Drenaje pluvial")
+    controller.rebuild_completer_later.flush()  # la reconstrucción está coalescida (50 ms)
     proxy = window.entry.picker_a._proxy
     proxy.set_query("drenaje")
     assert proxy.rowCount() == 1 and proxy.index(0, 0).data(ROLE_KIND) == "section"
@@ -433,6 +439,7 @@ def test_catalog_panel_double_click_adds_section_and_marks_it(app):
     window.catalog_panel.addRequested.emit(key)
     section = project.section_by_code("31 23 00")
     assert section is not None and section.title == "Excavation and Fill"
+    controller.catalog.refresh_keys_later.flush()  # marcado en el árbol coalescido (50 ms)
     assert idx.data(ROLE_IN_PROJECT_TREE) is True
     assert section.id in window.scene.nodes
 
@@ -462,3 +469,38 @@ def test_custom_section_dialog_suggests_catalog_entry(app):
     dialog.suggestion_button.click()
     assert dialog.values()[0] == "03 30 00"
     assert dialog.values()[1] == record.title
+
+
+def test_import_burst_triggers_few_heavy_refreshes(app, qtbot):
+    """Importar N secciones no debe reconstruir el autocompletado ni el análisis N veces."""
+    from models.project_io import Tables, apply_tables
+
+    project, window, controller, _t = app
+    completer_model = controller.completer_model
+    qtbot.wait(120)  # vaciar refrescos pendientes del arranque
+    rebuilds_before = completer_model.rebuilds
+    analysis_before = controller.analysis.refresh_later.fired
+    tables = Tables()
+    tables.sections = [{"code": f"{d:02d} 10 00", "title": f"Sección {d}", "category": "", "color": "",
+                        "status": "", "progress": "", "responsibles": "", "observations": ""} for d in range(1, 61)]
+    tables.relations = [{"a": f"{d:02d} 10 00", "kind": "Hace referencia a →", "b": f"{d + 1:02d} 10 00"}
+                        for d in range(1, 60)]
+    summary = controller.apply_tables_with_progress(tables)
+    assert summary is not None and summary.sections_created == 60 and summary.relations_created == 59
+    qtbot.wait(200)
+    assert completer_model.rebuilds - rebuilds_before <= 3
+    assert controller.analysis.refresh_later.fired - analysis_before <= 3
+    assert window.analysis.hubs_table.rowCount() == 50  # el panel lista como máximo 50 concentradoras
+    assert len(window.scene.nodes) == 60 and len(window.scene.edges) == 59
+
+
+def test_picker_defers_filtering_while_typing(app, qtbot):
+    _p, window, _c, _t = app
+    picker = window.entry.picker_a
+    total = picker._proxy.rowCount()
+    picker.setText("conc")
+    picker.textEdited.emit("conc")
+    assert picker._proxy.rowCount() == total  # aún no filtró: espera a que el usuario deje de escribir
+    qtbot.waitUntil(lambda: picker._proxy.rowCount() < total, timeout=3000)
+    assert picker.match_count() > 0
+    picker.flush_filter()

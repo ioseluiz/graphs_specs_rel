@@ -18,6 +18,7 @@ from config.settings import (
     GITHUB_USER,
     ORGANIZATION_NAME,
     RELEASE_YEAR,
+    debug_mode,
 )
 from views.components.github_link import GithubLinkWidget
 
@@ -92,6 +93,15 @@ class AboutDialog(QDialog):
         hint = QLabel("Presione F1 en la aplicación para abrir el manual de uso.")
         hint.setProperty("role", "hint")
         layout.addWidget(hint)
+        if debug_mode():
+            from utils.perf import perf_log_path
+
+            perf = QLabel(f"Modo diagnóstico activo (DEBUG_MODE): los bloqueos de la interfaz se registran en "
+                          f"<code>{perf_log_path()}</code>.")
+            perf.setWordWrap(True)
+            perf.setTextFormat(Qt.TextFormat.RichText)
+            perf.setProperty("role", "hint")
+            layout.addWidget(perf)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText("Cerrar")

@@ -42,7 +42,22 @@ clic derecho.
 
 SQLite no convive bien con carpetas sincronizadas mientras OneDrive trabaja. Espere unos segundos y
 reintente, marque el archivo como «Mantener siempre en este dispositivo» o trabaje en una carpeta local.
-Al abrir un proyecto se guardan tres copias de respaldo `.bak1`–`.bak3` junto al archivo.
+Si el archivo está bloqueado en el momento de un cambio, la aplicación avisa y ese cambio no se guarda;
+repita la acción cuando termine la sincronización. Al abrir un proyecto se guardan tres copias de respaldo
+`.bak1`–`.bak3` junto al archivo.
+
+## La aplicación se detiene o muestra «No responde»
+
+Las operaciones largas (leer un Excel, generar el reporte, reemplazar el catálogo, calcular la
+disposición 3D) se ejecutan en segundo plano y muestran un diálogo de progreso o el mensaje «Calculando
+disposición 3D…»; la ventana sigue respondiendo. Al importar tablas grandes, el mapa se va poblando con
+una barra de avance. Si aun así nota pausas:
+
+- Con el proyecto en OneDrive, marque el archivo como «Mantener siempre en este dispositivo».
+- En proyectos muy grandes, oculte responsables y avance (F6) para agilizar el mapa.
+- Para diagnosticar, cree un archivo `.env` junto al ejecutable con `DEBUG_MODE=true`: cada pausa mayor
+  de 0,4 s queda registrada en `%APPDATA%\SpecRel\perf.log` (la ruta se muestra en *Ayuda → Acerca de*).
+  Envíe ese archivo con su reporte.
 
 ## Los títulos del catálogo están en inglés
 

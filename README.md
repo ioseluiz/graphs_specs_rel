@@ -161,9 +161,30 @@ Relaciones y, opcionalmente, Mapa con la imagen del mapa 2D. Generado por `model
 ## Archivos en OneDrive
 
 SQLite no convive bien con carpetas sincronizadas mientras la sincronización está activa. El archivo
-usa `journal_mode=DELETE` y reintentos, pero se recomienda marcar el `.specrel` como
-"Mantener siempre en este dispositivo" o trabajar en una carpeta local. Al abrir un proyecto se
-conservan 3 copias de respaldo (`.bak1`…`.bak3`) junto al archivo.
+usa `journal_mode=DELETE`, `synchronous=NORMAL`, un `busy_timeout` corto (1,5 s) y un reintento, pero se
+recomienda marcar el `.specrel` como "Mantener siempre en este dispositivo" o trabajar en una carpeta
+local; la aplicación lo recuerda en la barra de estado al abrir un proyecto desde OneDrive. Si aun así el
+archivo está bloqueado, el cambio no se guarda y se muestra un aviso (la aplicación no se cierra). Al abrir
+un proyecto se conservan 3 copias de respaldo (`.bak1`…`.bak3`) junto al archivo.
+
+## Rendimiento y trabajo en segundo plano
+
+Reglas que mantienen la interfaz respondiendo (fase 8):
+
+- El hilo principal solo hace trabajo corto. Lo pesado y puro corre en `QThreadPool` mediante
+  `utils/workers.py` (`run_in_background`, `run_with_progress`): leer tablas Excel, exportar tablas y el
+  reporte (sobre un `ProjectModel.snapshot()`, nunca sobre el modelo vivo ni su conexión SQLite),
+  construir un catálogo reemplazado y calcular la disposición 3D (`layout3d`). Scipy se precalienta en un
+  hilo al arrancar.
+- Los oyentes costosos (autocompletado, análisis, marcas del árbol, 3D, repintado de nodos) se coalescen
+  con `utils/debounce.Debouncer`: una importación de 300 filas los ejecuta una vez, no 300.
+- Las importaciones escriben en una sola transacción (`ProjectModel.bulk()`) y muestran un diálogo de
+  progreso; abrir proyectos y poblar el mapa muestran cursor de espera.
+- El autocompletado no ordena en Python: el modelo ya viene ordenado y las consultas numéricas muestran
+  primero solo coincidencias por prefijo. Filtrar cuesta ~10 ms por tecla (antes ~330 ms).
+- Diagnóstico: con `DEBUG_MODE=true` en el `.env`, `utils/perf.FreezeWatchdog` registra en
+  `%APPDATA%\SpecRel\perf.log` cualquier bloqueo del hilo principal mayor de 400 ms con la pila del
+  código responsable. Pida ese archivo al usuario que reporte «No responde».
 
 ## Empaquetado
 
@@ -182,6 +203,7 @@ config/       settings.py, palette.py
 models/       schema, database, entities, relation_normalizer, repositories, graph_engine,
               layout_engine, catalog_importer, project_model, relations_table_model,
               section_completer_model
+utils/        debounce.py (coalescencia), workers.py (hilos + progreso), perf.py (vigilante de bloqueos)
 views/        main_window.py, styles/theme.qss, components/ (tabla, diálogos, análisis, 3D, canvas/)
 controllers/  main, relations, canvas, analysis, view3d, export
 tests/        pruebas unitarias (modelo, router) y de humo (GUI offscreen)

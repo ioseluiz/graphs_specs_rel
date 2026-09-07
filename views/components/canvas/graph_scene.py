@@ -42,7 +42,7 @@ class GraphScene(QGraphicsScene):
         node.setPos(x, y)
         self.addItem(node)
         self.nodes[section_id] = node
-        self.grow_scene_rect()
+        self.grow_scene_rect_to(node.sceneBoundingRect())  # O(1): no recorre toda la escena por nodo
         return node
 
     def update_node(self, section_id: int, code: str, title: str, fill: str, border: str) -> None:
@@ -68,7 +68,7 @@ class GraphScene(QGraphicsScene):
             return
         if abs(node.pos().x() - x) > 0.01 or abs(node.pos().y() - y) > 0.01:
             node.setPos(x, y)
-            self.grow_scene_rect()
+            self.grow_scene_rect_to(node.sceneBoundingRect())
 
     def remove_node(self, section_id: int) -> None:
         node = self.nodes.pop(section_id, None)
@@ -156,9 +156,16 @@ class GraphScene(QGraphicsScene):
         content = self.content_rect()
         if content.isNull():
             return
+        self.grow_scene_rect_to(content)
+
+    def grow_scene_rect_to(self, rect: QRectF) -> None:
+        """Amplía el rectángulo de la escena para contener `rect` con margen (nunca lo reduce)."""
+        if rect.isNull():
+            return
         margin = 800
-        wanted = content.adjusted(-margin, -margin, margin, margin)
-        self.setSceneRect(self.sceneRect().united(wanted))
+        wanted = rect.adjusted(-margin, -margin, margin, margin)
+        if not self.sceneRect().contains(wanted):
+            self.setSceneRect(self.sceneRect().united(wanted))
 
     def node_at(self, pos: QPointF) -> SectionNodeItem | None:
         for item in self.items(pos):

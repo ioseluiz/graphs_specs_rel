@@ -1,4 +1,10 @@
-"""Modelo de autocompletado de secciones: secciones del proyecto ∪ catálogo maestro MasterFormat."""
+"""Modelo de autocompletado de secciones: secciones del proyecto ∪ catálogo maestro MasterFormat.
+
+Rendimiento: el modelo fuente ya está ordenado (secciones del proyecto primero, luego catálogo por
+clave), así el proxy solo filtra y nunca ordena en Python (ordenar 8.800 filas costaba ~300 ms
+por tecla). Para consultas numéricas se aplica una regla de dos pasadas: si alguna clave empieza
+por los dígitos escritos se muestran solo esas; si ninguna, las que los contienen.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -43,6 +49,7 @@ class SectionCompleterModel(QAbstractListModel):
         super().__init__(parent)
         self._entries: list[CompleterEntry] = []
         self._by_key: dict[str, int] = {}
+        self.rebuilds = 0  # diagnóstico / pruebas
 
     def set_entries(self, entries: list[CompleterEntry]) -> None:
         self.beginResetModel()
@@ -51,6 +58,7 @@ class SectionCompleterModel(QAbstractListModel):
         self.endResetModel()
 
     def rebuild(self, project_model) -> None:
+        self.rebuilds += 1
         entries: list[CompleterEntry] = []
         present: set[str] = set()
         for s in project_model.sections():
@@ -69,14 +77,18 @@ class SectionCompleterModel(QAbstractListModel):
         for c in project_model.categories():
             colors[c.name.casefold()] = (c.fill_color, c.border_color)
         master = project_model.master
+        neutral = (palette.SURFACE_ALT, palette.BORDER)
         for r in master.all():  # catálogo maestro MasterFormat
             if r.code_key in present:
                 continue
             category = master.effective_category(r)
-            fill, border = colors.get((category or "").casefold(), (palette.SURFACE_ALT, palette.BORDER))
+            fill, border = colors.get((category or "").casefold(), neutral)
             entries.append(CompleterEntry("catalog", None, r.code, r.code_key, r.title, fill, border,
                                           search=r.search))
         self.set_entries(entries)
+
+    def entries(self) -> list[CompleterEntry]:
+        return self._entries
 
     def entry(self, row: int) -> CompleterEntry | None:
         return self._entries[row] if 0 <= row < len(self._entries) else None
@@ -131,39 +143,63 @@ class SectionFilterProxy(QSortFilterProxyModel):
     """Filtra por tokens (sin acentos) sobre código y título: '31 exc' -> '31 23 00 Excavación'.
 
     Un token compuesto solo por dígitos y espacios se compara compactado contra la clave
-    ('0330 00' encuentra '03 30 00').
+    ('0330 00' encuentra '03 30 00'). El orden es el del modelo fuente (proyecto primero).
     """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._tokens: list[str] = []
         self._digits: str = ""
+        self._prefix_only = False
         self.setDynamicSortFilter(False)
+
+    @property
+    def query(self) -> tuple[list[str], str]:
+        return list(self._tokens), self._digits
+
+    def setSourceModel(self, model) -> None:  # noqa: N802
+        super().setSourceModel(model)
+        # Tras reconstruir el modelo fuente la regla de prefijo puede cambiar (nuevas secciones).
+        model.modelReset.connect(self._on_source_reset)
+
+    def _on_source_reset(self) -> None:
+        if self._digits:
+            prefix_only = self._any_prefix_match(self._digits)
+            if prefix_only != self._prefix_only:
+                self._prefix_only = prefix_only
+                self.invalidateFilter()
 
     def set_query(self, text: str) -> None:
         tokens, new_digits = build_query(text)
-        if tokens != self._tokens or new_digits != self._digits:
-            self._tokens, self._digits = tokens, new_digits
-            self.invalidateFilter()
-            self.sort(0)  # secciones del proyecto primero; luego coincidencias por prefijo de código
+        if tokens == self._tokens and new_digits == self._digits:
+            return
+        self._tokens, self._digits = tokens, new_digits
+        self._prefix_only = bool(new_digits) and self._any_prefix_match(new_digits)
+        self.invalidateFilter()
 
-    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802
+    def _any_prefix_match(self, digits: str) -> bool:
         src = self.sourceModel()
-
-        def rank(idx: QModelIndex) -> tuple:
-            key = (src.data(idx, ROLE_CODE_KEY) or "").lower()
-            is_section = src.data(idx, ROLE_KIND) == "section"
-            prefix = bool(self._digits) and key.startswith(self._digits)
-            return (not is_section, not prefix, key)
-
-        return rank(left) < rank(right)
+        entries = getattr(src, "entries", None)
+        if callable(entries):
+            return any(e.code_key.lower().startswith(digits) for e in entries())
+        for row in range(src.rowCount()):
+            if (src.data(src.index(row, 0), ROLE_CODE_KEY) or "").lower().startswith(digits):
+                return True
+        return False
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # noqa: N802
         if not self._tokens and not self._digits:
             return True
-        idx = self.sourceModel().index(source_row, 0, source_parent)
+        src = self.sourceModel()
+        entry = src.entry(source_row) if hasattr(src, "entry") else None
+        if entry is not None:
+            key, haystack = entry.code_key.lower(), entry.search
+        else:
+            idx = src.index(source_row, 0, source_parent)
+            key = (src.data(idx, ROLE_CODE_KEY) or "").lower()
+            haystack = src.data(idx, ROLE_SEARCH) or ""
         if self._digits:
-            key = (self.sourceModel().data(idx, ROLE_CODE_KEY) or "").lower()
-            return key.startswith(self._digits) or self._digits in key
-        haystack = self.sourceModel().data(idx, ROLE_SEARCH) or ""
+            if self._prefix_only:
+                return key.startswith(self._digits)
+            return self._digits in key
         return all(tok in haystack for tok in self._tokens)
