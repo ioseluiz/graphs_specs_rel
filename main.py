@@ -40,6 +40,12 @@ def _selftest() -> int:
     from models.entities import UiKind
     from models.project_model import ProjectModel
 
+    for stream in (sys.stdout, sys.stderr):  # consolas sin UTF-8 (CI, cmd): no fallar por acentos
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
     QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_UseSoftwareOpenGL)
     app = QApplication(sys.argv)  # noqa: F841
     model = ProjectModel()

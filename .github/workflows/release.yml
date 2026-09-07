@@ -49,9 +49,14 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          PYTHONIOENCODING: utf-8
         run: |
-          & "dist\SpecRel\SpecRel.exe" --selftest
-          if ($LASTEXITCODE -ne 0) { throw "selftest failed" }
+          # SpecRel.exe es una app de ventana (sin consola): con "&" PowerShell no espera ni fija
+          # $LASTEXITCODE. Start-Process -Wait sí devuelve el código de salida real.
+          $p = Start-Process -FilePath "dist\SpecRel\SpecRel.exe" -ArgumentList "--selftest" `
+                 -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest.log -RedirectStandardError selftest.err
+          Get-Content selftest.log, selftest.err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "selftest failed with exit code $($p.ExitCode)" }
 
       - name: Build Inno Setup installer
         shell: pwsh
