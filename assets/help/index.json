@@ -1,0 +1,15 @@
+{
+  "topics": [
+    {"id": "inicio", "title": "Inicio rápido", "file": "inicio.md"},
+    {"id": "secciones", "title": "Secciones y catálogo MasterFormat", "file": "secciones.md"},
+    {"id": "relaciones", "title": "Relaciones", "file": "relaciones.md"},
+    {"id": "mapa", "title": "Mapa de referencias", "file": "mapa.md"},
+    {"id": "estatus", "title": "Estatus, avance y responsables", "file": "estatus.md"},
+    {"id": "categorias", "title": "Clasificación y colores", "file": "categorias.md"},
+    {"id": "analisis", "title": "Análisis e impacto", "file": "analisis.md"},
+    {"id": "vista3d", "title": "Vista 3D", "file": "vista3d.md"},
+    {"id": "exportar", "title": "Exportar e importar", "file": "exportar.md"},
+    {"id": "atajos", "title": "Atajos de teclado", "file": "atajos.md"},
+    {"id": "faq", "title": "Preguntas frecuentes", "file": "faq.md"}
+  ]
+}

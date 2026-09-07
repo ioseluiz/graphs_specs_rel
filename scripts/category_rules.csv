@@ -1,0 +1,52 @@
+prefix;category
+# Reglas de clasificación por defecto (prefijo de code_key -> categoría). Gana el prefijo más largo.
+# '??' = cualquier división (dos primeros dígitos). Se aplican al construir el catálogo maestro.
+;Técnica / constructiva
+00;Contractual
+01;Contractual
+0135;Auxiliar / apoyo
+0140;Auxiliar / apoyo
+0141;Auxiliar / apoyo
+0142;Auxiliar / apoyo
+0143;Auxiliar / apoyo
+0145;Auxiliar / apoyo
+0150;Auxiliar / apoyo
+0151;Auxiliar / apoyo
+0152;Auxiliar / apoyo
+0153;Auxiliar / apoyo
+0154;Auxiliar / apoyo
+0155;Auxiliar / apoyo
+0156;Auxiliar / apoyo
+0157;Auxiliar / apoyo
+0158;Auxiliar / apoyo
+0174;Auxiliar / apoyo
+0175;Técnica / constructiva
+0176;Auxiliar / apoyo
+0180;Técnica / constructiva
+0181;Técnica / constructiva
+0182;Técnica / constructiva
+0183;Técnica / constructiva
+0184;Técnica / constructiva
+0185;Técnica / constructiva
+0186;Técnica / constructiva
+0187;Técnica / constructiva
+0188;Técnica / constructiva
+0189;Técnica / constructiva
+0190;Auxiliar / apoyo
+0191;Auxiliar / apoyo
+0192;Auxiliar / apoyo
+0193;Auxiliar / apoyo
+0194;Auxiliar / apoyo
+02;Técnica / constructiva
+0220;Auxiliar / apoyo
+0221;Auxiliar / apoyo
+0222;Auxiliar / apoyo
+0224;Auxiliar / apoyo
+0225;Auxiliar / apoyo
+0226;Auxiliar / apoyo
+0230;Auxiliar / apoyo
+0231;Auxiliar / apoyo
+0232;Auxiliar / apoyo
+??01;Auxiliar / apoyo
+??06;Auxiliar / apoyo
+??08;Auxiliar / apoyo

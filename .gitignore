@@ -1,0 +1,37 @@
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Build artifacts
+build/
+dist/
+Output/
+
+# IDE
+.vscode/
+.idea/
+
+# Proyectos de prueba y salidas locales
+*.specrel
+*.specrel.bak*
+*.db
+screens/
+_prueba*
+
+# Datos de origen del cliente (no se versionan; el catálogo generado sí va en assets/data)
+info/*.xlsx
+info/*.png
+info/*.txt
+
+# OS
+Thumbs.db
+.DS_Store

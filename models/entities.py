@@ -1,0 +1,155 @@
+"""Entidades del dominio: dataclasses y enumeraciones compartidas."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Literal
+
+Side = Literal["top", "right", "bottom", "left"]
+SIDES: tuple[Side, ...] = ("top", "right", "bottom", "left")
+
+
+class RelationKind(str, Enum):
+    """Tipo persistido en la base de datos."""
+
+    REF = "ref"        # source hace referencia a target
+    MUTUAL = "mutual"  # referencia mutua (source_id < target_id)
+
+
+class UiKind(str, Enum):
+    """Tipo tal como lo elige el usuario en la interfaz."""
+
+    REFERENCES = "Hace referencia a →"
+    REFERENCED_BY = "← Es referenciada por"
+    MUTUAL = "Referencia mutua ↔"
+
+    @property
+    def short(self) -> str:
+        return {"REFERENCES": "→", "REFERENCED_BY": "←", "MUTUAL": "↔"}[self.name]
+
+    @classmethod
+    def from_text(cls, text: str) -> "UiKind":
+        for kind in cls:
+            if kind.value == text:
+                return kind
+        raise ValueError(f"Tipo de relación desconocido: {text!r}")
+
+
+@dataclass
+class ProjectMeta:
+    code: str = ""
+    name: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    app_version: str = ""
+
+    @property
+    def header(self) -> str:
+        parts = [p for p in (self.code.strip(), self.name.strip()) if p]
+        return " | ".join(parts) if parts else "Proyecto sin nombre"
+
+
+@dataclass
+class Category:
+    id: int
+    name: str
+    fill_color: str
+    border_color: str
+    sort_order: int = 0
+    is_default: bool = False
+
+
+@dataclass
+class Section:
+    id: int
+    code: str
+    code_key: str
+    title: str = ""
+    category_id: int | None = None
+    notes: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    fill_color: str | None = None    # color personalizado; None = usar el de la categoría
+    border_color: str | None = None
+    status_id: int | None = None
+    progress: int = 0                # 0..100
+
+    @property
+    def label(self) -> str:
+        """'03 30 00 - Concreto' (o solo el código si no hay descripción)."""
+        title = (self.title or "").strip()
+        return f"{self.code} - {title}" if title else self.code
+
+    @property
+    def has_custom_color(self) -> bool:
+        return bool(self.fill_color)
+
+    @property
+    def observations(self) -> str:
+        return self.notes or ""
+
+
+@dataclass
+class Status:
+    id: int
+    name: str
+    color: str
+    sort_order: int = 0
+    is_default: bool = False
+
+
+@dataclass
+class Responsible:
+    id: int
+    code: str
+    name: str
+    color: str
+    sort_order: int = 0
+
+    @property
+    def label(self) -> str:
+        return f"{self.code} - {self.name}" if self.name else self.code
+
+
+@dataclass
+class Relation:
+    id: int
+    source_id: int
+    target_id: int
+    kind: RelationKind
+    waypoints: list[tuple[float, float]] | None = None
+    source_port: Side | None = None
+    target_port: Side | None = None
+    notes: str | None = None
+    created_at: str = ""
+
+    def touches(self, section_id: int) -> bool:
+        return section_id in (self.source_id, self.target_id)
+
+    def other(self, section_id: int) -> int:
+        return self.target_id if section_id == self.source_id else self.source_id
+
+
+@dataclass
+class NodePosition:
+    section_id: int
+    x: float
+    y: float
+    pinned: bool = False
+
+
+@dataclass
+class CatalogEntry:
+    code_key: str
+    code: str
+    title: str
+    category_name: str | None = None
+
+
+@dataclass
+class SectionRemoval:
+    """Información devuelta al eliminar una sección (base para undo futuro)."""
+
+    section: Section
+    relations: list[Relation] = field(default_factory=list)
+    position: NodePosition | None = None

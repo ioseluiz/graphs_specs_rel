@@ -1,0 +1,70 @@
+code;title_en
+00 73 00;Supplementary Conditions
+01 53 00;Temporary Construction
+03 08 00;Commissioning of Concrete
+03 11 00;Concrete Forming
+03 11 13;Structural Cast-in-Place Concrete Forming
+03 11 16;Architectural Cast-in-Place Concrete Forming
+03 11 23;Permanent Stair Forming
+03 15 00;Concrete Accessories
+03 15 16;Concrete Construction Joints
+03 15 19;Cast-In Concrete Anchors
+03 20 00;Concrete Reinforcing
+03 21 00;Reinforcement Bars
+03 23 00;Stressed Tendon Reinforcing
+03 30 00;Cast-in-Place Concrete
+03 30 53;Miscellaneous Cast-in-Place Concrete
+03 31 00;Structural Concrete
+03 31 13;Heavyweight Structural Concrete
+03 33 00;Architectural Concrete
+03 33 13;Heavyweight Architectural Concrete
+03 33 16;Lightweight Architectural Concrete
+03 34 00;Low Density Concrete
+03 35 00;Concrete Finishing
+03 35 16;Heavyweight Concrete Finishing
+03 35 23;Exposed Aggregate Concrete Finishing
+03 35 33;Stamped Concrete Finishing
+03 37 16;Pumped Concrete
+03 38 00;Post-Tensioned Concrete
+03 38 13;Unbonded Post-Tensioned Concrete
+03 39 00;Concrete Curing
+03 39 13;Water Concrete Curing
+03 40 00;Precast Concrete
+03 41 00;Precast Structural Concrete
+03 41 23;Precast Concrete Stairs
+03 45 00;Precast Architectural Concrete
+03 45 13;Faced Architectural Precast Concrete
+03 47 13;Tilt-Up Concrete
+03 48 00;Precast Concrete Specialties
+03 49 00;Glass-Fiber-Reinforced Concrete
+03 50 00;Cast Decks and Underlayment
+03 51 13;Cementitious Wood Fiber Decks
+03 51 16;Gypsum Concrete Roof Decks
+03 52 00;Lightweight Concrete Roof Insulation
+03 52 16;Lightweight Insulating Concrete
+03 53 00;Concrete Topping
+03 54 00;Cast Underlayment
+03 54 13;Gypsum Cement Underlayment
+03 54 16;Hydraulic Cement Underlayment
+03 60 00;Grouting
+03 61 00;Cementitious Grouting
+03 61 13;Dry-Pack Grouting
+03 62 00;Non-Shrink Grouting
+03 62 16;Non-Metallic Non-Shrink Grouting
+03 63 00;Epoxy Grouting
+03 64 00;Injection Grouting
+03 70 00;Mass Concrete
+03 71 00;Mass Concrete for Raft Foundations
+03 72 00;Mass Concrete for Dams
+03 81 00;Concrete Cutting
+03 82 00;Concrete Boring
+10 30 00;Fireplaces and Stoves
+12 46 00;Furnishing Accessories
+25 31 00;Integrated Automation Instrumentation and Terminal Devices for Facility Equipment
+25 32 00;Integrated Automation Instrumentation and Terminal Devices for Conveying Equipment
+25 33 00;Integrated Automation Instrumentation and Terminal Devices for Fire-Suppression Systems
+25 38 00;Integrated Automation Instrumentation and Terminal Devices for Electronic Safety and Security
+33 80 00;Communications Utilities
+43 01 00;Operation and Maintenance of Process Gas and Liquid Handling, Purification, and Storage Equipment
+43 05 00;Common Work Results for Process Gas and Liquid Handling, Purification, and Storage Equipment
+43 08 00;Commissioning of Process Gas and Liquid Handling, Purification, and Storage Equipment

@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Generate icons (if missing)
+        run: |
+          python generate_icon.py
+          python generate_icons.py
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/ -q
+
+      - name: Build executable with PyInstaller (OneDir)
+        run: pyinstaller specrel.spec --noconfirm
+
+      - name: Smoke-test the frozen executable
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          & "dist\SpecRel\SpecRel.exe" --selftest
+          if ($LASTEXITCODE -ne 0) { throw "selftest failed" }
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            /DAppVersion="${{ steps.version.outputs.VERSION }}" `
+            setup.iss
+
+      - name: Zip portable build
+        shell: pwsh
+        run: Compress-Archive -Path dist\SpecRel\* -DestinationPath "SpecRel_${{ steps.version.outputs.VERSION }}_portable.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Output/SpecRel_Setup_*.exe
+            SpecRel_*_portable.zip
+          generate_release_notes: true
+          # Versiones 0.x se publican como pre-release (beta de pruebas)
+          prerelease: ${{ startsWith(steps.version.outputs.VERSION, '0.') }}
