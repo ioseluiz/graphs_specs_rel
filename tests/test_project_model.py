@@ -34,27 +34,48 @@ def test_add_relation_normalizes_and_signals(model, spy):
     assert model.graph.G.has_edge(a.id, b.id)
 
 
-def test_duplicate_relation_reports_existing(model):
+def test_inverse_relation_is_independent_and_same_direction_is_duplicate(model):
     a = model.add_section("A")
     b = model.add_section("B")
     rel = model.add_relation(a.id, UiKind.REFERENCES, b.id)
+    back = model.add_relation(b.id, UiKind.REFERENCES, a.id)   # B → A: segunda flecha, sin conflicto
+    assert back.id != rel.id and len(model.relations()) == 2
+    assert model.reverse_relation(rel.id).id == back.id and model.reverse_relation(back.id).id == rel.id
+    assert model.graph.G.has_edge(a.id, b.id) and model.graph.G.has_edge(b.id, a.id)
+    assert model.graph.edge_count == 2
     with pytest.raises(DuplicateRelationError) as exc:
-        model.add_relation(b.id, UiKind.REFERENCES, a.id)
+        model.add_relation(a.id, UiKind.REFERENCES, b.id)
     assert exc.value.existing.id == rel.id
+    with pytest.raises(DuplicateRelationError) as exc2:
+        model.add_relation(a.id, UiKind.REFERENCED_BY, b.id)   # = B → A, ya existe
+    assert exc2.value.existing.id == back.id
     with pytest.raises(SelfRelationError):
         model.add_relation(a.id, UiKind.REFERENCES, a.id)
 
 
-def test_make_mutual_reorders(model, spy):
+def test_invert_relation_resets_geometry_and_is_blocked_by_existing_inverse(model, spy):
     a = model.add_section("A")
     b = model.add_section("B")
-    rel = model.add_relation(b.id, UiKind.REFERENCES, a.id)  # b -> a (source > target)
+    rel = model.add_relation(a.id, UiKind.REFERENCES, b.id)
+    model.set_relation_geometry(rel.id, [(1.0, 2.0)], "right", "left")
     updated = spy(model.relationUpdated)
-    new = model.make_mutual(rel.id)
-    assert new.kind is RelationKind.MUTUAL
-    assert new.source_id < new.target_id
+    new = model.invert_relation(rel.id)
+    assert (new.source_id, new.target_id, new.kind) == (b.id, a.id, RelationKind.REF)
+    assert new.waypoints is None and new.source_port is None   # los puertos cambian de nodo
     assert len(updated) == 1
-    assert model.graph.G.has_edge(a.id, b.id) and model.graph.G.has_edge(b.id, a.id)
+    assert model.graph.G.has_edge(b.id, a.id) and not model.graph.G.has_edge(a.id, b.id)
+    model.add_relation(a.id, UiKind.REFERENCES, b.id)          # ahora existen ambas
+    with pytest.raises(DuplicateRelationError):
+        model.invert_relation(new.id)                          # B → A no puede volverse A → B: ya existe
+
+
+def test_relation_notes_persist(model):
+    a = model.add_section("A")
+    b = model.add_section("B")
+    rel = model.add_relation(a.id, UiKind.REFERENCES, b.id, notes="  Ver artículo 3.2  ")
+    assert rel.notes == "Ver artículo 3.2"
+    model.set_relation_notes(rel.id, "")
+    assert model.relation(rel.id).notes is None
 
 
 def test_update_relation_changes_target(model):
@@ -101,7 +122,8 @@ def test_persist_and_reopen(tmp_path, qcore_app):
     m.new_project(path, "CC-1", "Demo")
     a = m.add_section("A", "Alpha")
     b = m.add_section("B", "Beta")
-    m.add_relation(a.id, UiKind.MUTUAL, b.id)
+    m.add_relation(a.id, UiKind.REFERENCES, b.id)
+    m.add_relation(b.id, UiKind.REFERENCES, a.id)
     m.move_node(a.id, 42, 24)
     m.close()
 
@@ -109,7 +131,7 @@ def test_persist_and_reopen(tmp_path, qcore_app):
     m2.open_project(path)
     assert m2.meta().header == "CC-1 | Demo"
     assert [s.code for s in m2.sections()] == ["A", "B"]
-    assert m2.relations()[0].kind is RelationKind.MUTUAL
+    assert len(m2.relations()) == 2 and all(r.kind is RelationKind.REF for r in m2.relations())
     assert (m2.position(m2.section_by_code("A").id).x, m2.position(m2.section_by_code("A").id).y) == (42, 24)
     m2.close()
 

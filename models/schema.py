@@ -1,7 +1,7 @@
 """DDL del archivo de proyecto (.specrel) y versionado de esquema."""
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 HEX_COLOR_CHECK = "GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'"
 
@@ -67,17 +67,16 @@ CREATE TABLE IF NOT EXISTS relations (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id   INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
     target_id   INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('ref', 'mutual')),
+    kind        TEXT NOT NULL DEFAULT 'ref' CHECK (kind = 'ref'),
     waypoints   TEXT,
     source_port TEXT CHECK (source_port IS NULL OR source_port IN ('top','right','bottom','left')),
     target_port TEXT CHECK (target_port IS NULL OR target_port IN ('top','right','bottom','left')),
     notes       TEXT,
     created_at  TEXT NOT NULL,
-    CHECK (source_id <> target_id),
-    CHECK (kind <> 'mutual' OR source_id < target_id)
+    CHECK (source_id <> target_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_pair
-    ON relations (MIN(source_id, target_id), MAX(source_id, target_id));
+-- Una relación por par DIRIGIDO: A→B y B→A son dos flechas distintas.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_directed ON relations (source_id, target_id);
 CREATE INDEX IF NOT EXISTS ix_relations_source ON relations(source_id);
 CREATE INDEX IF NOT EXISTS ix_relations_target ON relations(target_id);
 
@@ -131,5 +130,16 @@ MIGRATIONS: dict[int, list[str]] = {
             sort_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (section_id, responsible_id))""",
         "ALTER TABLE sections ADD COLUMN status_id INTEGER REFERENCES statuses(id) ON DELETE SET NULL",
         "ALTER TABLE sections ADD COLUMN progress INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100)",
+    ],
+    # v4: se elimina la "referencia mutua"; cada dirección es una relación independiente.
+    # Las mutuas existentes se dividen en dos 'ref' (la inversa nace sin geometría: waypoints y
+    # puertos solo valen para la dirección original). Los CHECK antiguos de la tabla quedan en las
+    # bases migradas, pero ya no estorban porque no habrá filas 'mutual'.
+    4: [
+        "DROP INDEX IF EXISTS ux_relations_pair",
+        """INSERT INTO relations (source_id, target_id, kind, notes, created_at)
+            SELECT target_id, source_id, 'ref', notes, created_at FROM relations WHERE kind = 'mutual'""",
+        "UPDATE relations SET kind = 'ref' WHERE kind = 'mutual'",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_directed ON relations (source_id, target_id)",
     ],
 }

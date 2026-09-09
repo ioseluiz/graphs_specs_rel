@@ -38,22 +38,61 @@ def test_self_relation_rejected(db):
         RelationRepo(db).insert(a.id, a.id, RelationKind.REF)
 
 
-def test_pair_unique_regardless_of_direction(db):
+def test_directed_pair_unique_but_inverse_allowed(db):
+    """A→B y B→A son dos relaciones distintas; solo la misma dirección es duplicado."""
     a, b = _two_sections(db)
     rels = RelationRepo(db)
-    rels.insert(a.id, b.id, RelationKind.REF)
+    first = rels.insert(a.id, b.id, RelationKind.REF)
+    second = rels.insert(b.id, a.id, RelationKind.REF)
+    assert first.id != second.id
+    assert rels.find_directed(a.id, b.id).id == first.id
+    assert rels.find_directed(b.id, a.id).id == second.id
+    assert rels.reverse_of(first).id == second.id
     with pytest.raises(sqlite3.IntegrityError):
-        rels.insert(b.id, a.id, RelationKind.REF)
-    with pytest.raises(sqlite3.IntegrityError):
-        rels.insert(min(a.id, b.id), max(a.id, b.id), RelationKind.MUTUAL)
+        rels.insert(a.id, b.id, RelationKind.REF)
 
 
-def test_mutual_must_be_canonical(db):
-    a, b = _two_sections(db)
-    with pytest.raises(sqlite3.IntegrityError):
-        RelationRepo(db).insert(max(a.id, b.id), min(a.id, b.id), RelationKind.MUTUAL)
-    rel = RelationRepo(db).insert(min(a.id, b.id), max(a.id, b.id), RelationKind.MUTUAL)
-    assert rel.kind is RelationKind.MUTUAL
+def test_migration_v3_to_v4_splits_mutual_into_two_arrows(tmp_path):
+    """Una «referencia mutua» del esquema anterior pasa a ser dos relaciones 'ref' independientes."""
+    from models.schema import SCHEMA_SQL
+
+    v3_sql = SCHEMA_SQL.replace(
+        "kind        TEXT NOT NULL DEFAULT 'ref' CHECK (kind = 'ref'),",
+        "kind        TEXT NOT NULL CHECK (kind IN ('ref', 'mutual')),",
+    ).replace(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_directed ON relations (source_id, target_id);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_pair "
+        "ON relations (MIN(source_id, target_id), MAX(source_id, target_id));",
+    )
+    assert "ux_relations_pair" in v3_sql and "'mutual'" in v3_sql
+    path = tmp_path / "v3.specrel"
+    conn = sqlite3.connect(path)
+    conn.executescript(v3_sql)
+    conn.execute("PRAGMA user_version = 3")
+    conn.execute("INSERT INTO project (id, code, name, created_at, updated_at, app_version) "
+                 "VALUES (1, 'X', 'Y', 'now', 'now', '0.2.1')")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, created_at, updated_at) "
+                 "VALUES (1, '01 35 29', '013529', 'Seguridad', 'now', 'now')")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, created_at, updated_at) "
+                 "VALUES (2, '03 30 00', '033000', 'Concreto', 'now', 'now')")
+    conn.execute("INSERT INTO relations (source_id, target_id, kind, waypoints, source_port, target_port, notes, "
+                 "created_at) VALUES (1, 2, 'mutual', '[[10, 20]]', 'right', 'left', 'nota', 'now')")
+    conn.execute("INSERT INTO relations (source_id, target_id, kind, created_at) VALUES (2, 1, 'ref', 'now')"
+                 if False else "SELECT 1")
+    conn.commit()
+    conn.close()
+
+    db = ProjectDatabase.open(path)
+    assert db.schema_version() == SCHEMA_VERSION == 4
+    rels = sorted(RelationRepo(db).all(), key=lambda r: r.id)
+    assert [(r.source_id, r.target_id, r.kind) for r in rels] == [(1, 2, RelationKind.REF), (2, 1, RelationKind.REF)]
+    original, inverse = rels
+    assert original.waypoints == [(10.0, 20.0)] and original.source_port == "right"
+    assert inverse.waypoints is None and inverse.source_port is None and inverse.target_port is None
+    assert inverse.notes == "nota"
+    with pytest.raises(sqlite3.IntegrityError):  # el índice dirigido quedó creado
+        RelationRepo(db).insert(1, 2, RelationKind.REF)
+    db.close()
 
 
 def test_cascade_on_section_delete(db):

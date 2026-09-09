@@ -30,6 +30,7 @@ from controllers.sections_controller import SectionsController
 from controllers.view3d_controller import View3DController
 from models.catalog_importer import CatalogImportError, import_for
 from models.database import ProjectFileError, ProjectLockedError
+from models.project_bootstrap import classify_paths, project_meta_from, project_path_for
 from models.project_io import (
     ProjectIOError,
     apply_tables,
@@ -72,6 +73,8 @@ class MainController(QObject):
                                          self.rebuild_completer_later, self)
         self.sections = SectionsController(project, window, self.canvas, self)
         self.help = HelpController(window, self)
+        window.filesDropped.connect(self.open_dropped_files)
+        window.view.filesDropped.connect(self.open_dropped_files)
 
         window.act_new.triggered.connect(self.new_project)
         window.act_open.triggered.connect(self.open_project_dialog)
@@ -110,7 +113,8 @@ class MainController(QObject):
     def start(self, path: str | None = None) -> None:
         self.window.show()
         if path:
-            self.open_project(path)
+            # «Abrir con…» desde Windows: un .specrel se abre; un .xlsx/.csv de la plantilla crea el mapa.
+            self.open_dropped_files([path])
 
     # ------------------------------------------------------------------ recientes
     def _recent(self) -> list[str]:
@@ -148,6 +152,9 @@ class MainController(QObject):
         except ProjectFileError as exc:
             QMessageBox.critical(self.window, "Nuevo proyecto", str(exc))
             return
+        self._after_project_created(p)
+
+    def _after_project_created(self, p: Path) -> None:
         self.settings.setValue(SETTINGS_LAST_DIR, str(p.parent))
         self._push_recent(p)
         catalog = default_catalog_path()
@@ -346,21 +353,138 @@ class MainController(QObject):
             QMessageBox.critical(self.window, "Plantilla", str(exc))
 
     def import_tables(self) -> None:
-        if not self.project.is_open:
-            QMessageBox.information(self.window, "Importar tablas",
-                                    "Cree o abra un proyecto antes de importar las tablas.")
-            return
+        """Con proyecto abierto: agrega las tablas. Sin proyecto: crea el mapa (y el .specrel) desde el archivo."""
         start = self.settings.value(SETTINGS_LAST_DIR, "", type=str)
+        title = ("Importar tablas de secciones y relaciones" if self.project.is_open
+                 else "Crear mapa desde Excel o CSV (plantilla)")
         paths, _ = QFileDialog.getOpenFileNames(
-            self.window, "Importar tablas de secciones y relaciones", start,
-            "Excel o CSV (*.xlsx *.xlsm *.csv);;Todos los archivos (*)")
+            self.window, title, start, "Excel o CSV (*.xlsx *.xlsm *.csv);;Todos los archivos (*)")
         if not paths:
             return
         files = [Path(p) for p in paths]
+        if self.project.is_open:
+            self._read_tables_then(files, lambda tables: self._confirm_and_apply_tables(tables, files))
+        else:
+            self.create_project_from_tables(files)
+
+    def _read_tables_then(self, files: list[Path], on_done) -> None:
         # Leer el Excel (openpyxl puede tardar segundos en libros grandes) sin bloquear la ventana.
-        run_with_progress(self.window, "Importar tablas", "Leyendo el archivo…", read_tables, files,
-                          on_done=lambda tables: self._confirm_and_apply_tables(tables, files),
-                          on_error=self._on_import_read_failed)
+        run_with_progress(self.window, "Leer tablas", "Leyendo el archivo…", read_tables, files,
+                          on_done=on_done, on_error=self._on_import_read_failed)
+
+    # ------------------------------------------------------------------ archivos arrastrados / «Abrir con»
+    def open_dropped_files(self, paths: list) -> None:
+        """Rutas soltadas sobre la ventana o pasadas por línea de comandos."""
+        projects, tables, others = classify_paths([str(p) for p in paths])
+        if projects:
+            self.open_project(str(projects[0]))
+            if len(projects) > 1 or tables:
+                self.window.show_status("Se abrió el primer proyecto; los demás archivos se ignoraron.", 8000)
+            return
+        if tables:
+            if not self.project.is_open:
+                self.create_project_from_tables(tables)
+                return
+            names = ", ".join(p.name for p in tables)
+            choice = self._ask_choice(
+                "Archivo de tablas",
+                f"¿Qué desea hacer con {names}?",
+                ["Agregar al proyecto abierto", "Crear un mapa nuevo con este archivo"],
+                informative="«Agregar» crea o actualiza secciones y relaciones en el proyecto actual sin borrar "
+                            "nada. «Crear un mapa nuevo» guarda otro proyecto (.specrel) junto al archivo.")
+            if choice == 0:
+                self._read_tables_then(tables, lambda t: self._confirm_and_apply_tables(t, tables))
+            elif choice == 1:
+                self.create_project_from_tables(tables)
+            return
+        if others:
+            self.window.show_status(
+                f"Formato no soportado: {others[0].name}. Arrastre un proyecto {PROJECT_EXTENSION} o un archivo "
+                ".xlsx/.csv de la plantilla.", 8000)
+
+    def _ask_choice(self, title: str, text: str, options: list[str], informative: str = "",
+                    destructive: int | None = None) -> int | None:
+        """Pregunta con botones propios; devuelve el índice elegido o None si se cancela."""
+        box = QMessageBox(self.window)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(text)
+        if informative:
+            box.setInformativeText(informative)
+        buttons = []
+        for i, label in enumerate(options):
+            role = QMessageBox.ButtonRole.DestructiveRole if i == destructive else QMessageBox.ButtonRole.AcceptRole
+            buttons.append(box.addButton(label, role))
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(buttons[0])
+        box.exec()
+        clicked = box.clickedButton()
+        return next((i for i, b in enumerate(buttons) if b is clicked), None)
+
+    def create_project_from_tables(self, files: list[Path]) -> None:
+        """Lee las tablas y crea un proyecto nuevo con ellas (el .specrel se guarda junto al primer archivo)."""
+        self._read_tables_then(files, lambda tables: self._create_project_with_tables(tables, files))
+
+    def _create_project_with_tables(self, tables, files: list[Path]) -> None:
+        dest = project_path_for(files[0])
+        if dest.exists():
+            choice = self._ask_choice(
+                "Crear mapa desde Excel",
+                f"Ya existe un proyecto con ese nombre:\n{dest}",
+                ["Abrir el existente y agregar las tablas", "Reemplazar", "Elegir otra ubicación…"],
+                informative="«Reemplazar» borra el proyecto existente y crea uno nuevo solo con estas tablas.",
+                destructive=1)
+            if choice == 0:
+                self.open_project(str(dest))
+                if self.project.is_open:
+                    self._confirm_and_apply_tables(tables, files)
+                return
+            if choice == 2:
+                path, _ = QFileDialog.getSaveFileName(
+                    self.window, "Guardar el proyecto nuevo como", str(dest), PROJECT_FILE_FILTER)
+                if not path:
+                    return
+                dest = Path(path)
+                if dest.suffix.lower() != PROJECT_EXTENSION:
+                    dest = dest.with_suffix(PROJECT_EXTENSION)
+            elif choice != 1:
+                return
+        code, name = project_meta_from(tables, files[0])
+        try:
+            with busy_cursor():
+                self.project.new_project(dest, code, name)
+        except ProjectFileError as exc:
+            QMessageBox.critical(self.window, "Crear mapa desde Excel", str(exc))
+            return
+        self._after_project_created(dest)
+        summary = self.apply_tables_with_progress(tables)
+        if summary is None:
+            return
+        # Proyecto recién creado: nada está fijado, así que se acomoda todo el mapa (nunca en proyectos existentes).
+        self.canvas.arrange_unpinned()
+        self.canvas.view.fit_all()
+        self._show_import_summary("Mapa creado", summary,
+                                  f"Proyecto guardado en:\n{dest}\n\nLas secciones se acomodaron "
+                                  "automáticamente; puede moverlas y no volverán a moverse.")
+        self.window.show_status(f"Mapa creado en {dest}: {len(self.project.sections())} secciones, "
+                                f"{len(self.project.relations())} relaciones. Los cambios se guardan "
+                                "automáticamente.", 12000)
+
+    def _show_import_summary(self, title: str, summary, header: str = "") -> None:
+        """Resumen de la importación con botón «Copiar detalle» (todas las filas omitidas o con problemas)."""
+        box = QMessageBox(self.window)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(header or title)
+        box.setInformativeText(summary.text())
+        copy_btn = None
+        if summary.skipped or summary.errors:
+            copy_btn = box.addButton("Copiar detalle", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if copy_btn is not None and box.clickedButton() is copy_btn:
+            QApplication.clipboard().setText(summary.full_text())
+            self.window.show_status("Detalle de la importación copiado al portapapeles.", 6000)
 
     def _on_import_read_failed(self, exc: BaseException, _tb: str) -> None:
         if isinstance(exc, ProjectIOError):
@@ -383,7 +507,7 @@ class MainController(QObject):
             return
         self.settings.setValue(SETTINGS_LAST_DIR, str(files[0].parent))
         self.canvas.view.fit_all()
-        QMessageBox.information(self.window, "Importación completada", summary.text())
+        self._show_import_summary("Importación completada", summary)
         self.window.show_status(
             f"Importadas {summary.sections_created} secciones y {summary.relations_created} relaciones.", 8000)
 

@@ -53,7 +53,8 @@ RELATIONS = [
     ("33 40 00", UiKind.REFERENCES, "31 05 19"),
     ("33 40 00", UiKind.REFERENCES, "01 50 00"),
     ("01 50 00", UiKind.REFERENCED_BY, "33 40 00"),  # duplicado inverso: se ignora en el script
-    ("01 35 29", UiKind.MUTUAL, "01 57 20"),
+    ("01 35 29", UiKind.REFERENCES, "01 57 20"),
+    ("01 57 20", UiKind.REFERENCES, "01 35 29"),  # sentido contrario: dos flechas entre el mismo par
 ]
 
 

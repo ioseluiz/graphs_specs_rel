@@ -50,6 +50,24 @@ def _rgba(hex_color: str, alpha: float) -> tuple[float, float, float, float]:
     return r, g, b, alpha
 
 
+def _offset_pair(pa: np.ndarray, pb: np.ndarray, sign: int) -> tuple[np.ndarray, np.ndarray]:
+    """Desplaza el segmento pa->pb en perpendicular (2 % de su longitud) hacia un lado u otro.
+
+    Se usa cuando existen las dos flechas A->B y B->A: con signos opuestos quedan una al lado de la otra
+    en vez de superponerse y anularse visualmente.
+    """
+    d = pb - pa
+    length = float(np.linalg.norm(d))
+    if length < 1e-6:
+        return pa, pb
+    up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    if abs(float(np.dot(d / length, up))) > 0.95:
+        up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    normal = np.cross(d, up)
+    normal = normal / (float(np.linalg.norm(normal)) or 1.0) * (0.02 * length * sign)
+    return pa + normal, pb + normal
+
+
 class Graph3DWidget(QWidget):
     recalcRequested = pyqtSignal()
     nodeLabelsToggled = pyqtSignal(bool)
@@ -169,14 +187,14 @@ class Graph3DWidget(QWidget):
         positions: np.ndarray,          # (N, 3)
         fills: list[str],
         edges: np.ndarray,              # (E, 2) índices en node_ids
-        mutual: np.ndarray,             # (E,) bool
+        paired: np.ndarray,             # (E,) bool: existe también la arista inversa
         labels: list[str],
         degrees: list[int],
     ) -> None:
         first_time = self._data is None or len(self._data["ids"]) == 0
         self._data = {
             "ids": node_ids, "pos": positions, "fills": fills, "edges": edges,
-            "mutual": mutual, "labels": labels, "degrees": degrees,
+            "paired": paired, "labels": labels, "degrees": degrees,
         }
         self._status = ""
         self._update_info()
@@ -248,11 +266,15 @@ class Graph3DWidget(QWidget):
             seg_col = np.zeros((len(edges) * 2, 4), dtype=np.float32)
             base = _rgba(palette.EDGE_COLOR, 1.0)
             for k, (a, b) in enumerate(edges):
-                seg[2 * k] = pos[a]
-                seg[2 * k + 1] = pos[b]
+                pa, pb = pos[a], pos[b]
+                if data["paired"][k]:
+                    # Dos flechas opuestas entre los mismos puntos: separarlas para que no se anulen.
+                    pa, pb = _offset_pair(pa, pb, +1 if a < b else -1)
+                seg[2 * k] = pa
+                seg[2 * k + 1] = pb
                 visible = hl is None or (ids[a] in hl and ids[b] in hl)
                 strong = 0.95 if visible else 0.06
-                weak = (0.95 if data["mutual"][k] else 0.30) if visible else 0.06
+                weak = 0.30 if visible else 0.06
                 seg_col[2 * k] = (*base[:3], weak)       # origen tenue → destino fuerte (dirección)
                 seg_col[2 * k + 1] = (*base[:3], strong)
             self._lines = gl.GLLinePlotItem(pos=seg, color=seg_col, width=2.0, mode="lines", antialias=True)
@@ -346,14 +368,14 @@ class Graph3DWidget(QWidget):
     def projected_scene(self) -> dict[str, Any]:
         """Proyección 2D de la escena con la cámara actual, para exportar a SVG.
 
-        Devuelve: size (w, h), nodes [(x, y, depth, fill, label|None, section_id)], edges [(i, j, mutual, visible)].
+        Devuelve: size (w, h), nodes [(x, y, depth, fill, label|None, section_id)], edges [(i, j, paired, visible)].
         """
         from PyQt6.QtGui import QVector4D
 
         if not self.ensure_gl():
             raise RuntimeError("La vista 3D no está disponible en este equipo.")
         data = self._data or {"ids": [], "pos": np.zeros((0, 3)), "fills": [], "edges": np.zeros((0, 2), int),
-                              "mutual": np.zeros(0, bool), "labels": [], "degrees": []}
+                              "paired": np.zeros(0, bool), "labels": [], "degrees": []}
         view = self._view
         w, h = max(1, view.width()), max(1, view.height())
         try:  # pyqtgraph >= 0.14 exige región y viewport explícitos
@@ -382,5 +404,5 @@ class Graph3DWidget(QWidget):
         for k, (a, b) in enumerate(data["edges"]):
             ids = data["ids"]
             visible = hl is None or (ids[a] in hl and ids[b] in hl)
-            edges.append({"a": int(a), "b": int(b), "mutual": bool(data["mutual"][k]), "visible": visible})
+            edges.append({"a": int(a), "b": int(b), "paired": bool(data["paired"][k]), "visible": visible})
         return {"size": (w, h), "nodes": nodes, "edges": edges}

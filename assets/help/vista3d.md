@@ -11,7 +11,8 @@ explorar la estructura general; la edición se hace en el mapa 2D y en las tabla
   se guarda con el proyecto).
 - **Mostrar todas las etiquetas**: por defecto solo se etiquetan las secciones con más relaciones.
 - El color de cada punto es el de su sección. Las líneas van de un tono tenue en el origen a uno intenso en
-  el destino para indicar la dirección; las mutuas son intensas en ambos extremos.
+  el destino para indicar la dirección. Cuando existen las dos flechas entre un mismo par de secciones, se
+  dibujan ligeramente separadas, una a cada lado.
 - El resaltado de impacto de la pestaña Análisis también se refleja aquí.
 
 ## Exportar

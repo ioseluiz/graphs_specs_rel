@@ -12,8 +12,7 @@ SIDES: tuple[Side, ...] = ("top", "right", "bottom", "left")
 class RelationKind(str, Enum):
     """Tipo persistido en la base de datos."""
 
-    REF = "ref"        # source hace referencia a target
-    MUTUAL = "mutual"  # referencia mutua (source_id < target_id)
+    REF = "ref"  # source hace referencia a target (único tipo desde el esquema v4)
 
 
 class UiKind(str, Enum):
@@ -21,11 +20,10 @@ class UiKind(str, Enum):
 
     REFERENCES = "Hace referencia a →"
     REFERENCED_BY = "← Es referenciada por"
-    MUTUAL = "Referencia mutua ↔"
 
     @property
     def short(self) -> str:
-        return {"REFERENCES": "→", "REFERENCED_BY": "←", "MUTUAL": "↔"}[self.name]
+        return {"REFERENCES": "→", "REFERENCED_BY": "←"}[self.name]
 
     @classmethod
     def from_text(cls, text: str) -> "UiKind":

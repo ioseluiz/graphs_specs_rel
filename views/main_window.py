@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from config.settings import APP_DISPLAY_NAME, APP_NAME, GITHUB_USER, ICONS_DIR
 from models.masterformat_tree_model import MasterFormatTreeModel
+from models.project_bootstrap import is_droppable
 from models.relations_table_model import RelationsTableModel
 from models.section_completer_model import SectionCompleterModel
 from views.components.analysis_panel import AnalysisPanel
@@ -47,6 +48,7 @@ def icon(name: str) -> QIcon:
 class MainWindow(QMainWindow):
     recentFileActivated = pyqtSignal(str)
     aboutToClose = pyqtSignal()
+    filesDropped = pyqtSignal(list)   # rutas locales (.specrel, .xlsx, .csv) soltadas sobre la ventana
 
     def __init__(self, table_model: RelationsTableModel, completer_model: SectionCompleterModel,
                  tree_model: MasterFormatTreeModel | None = None) -> None:
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1600, 900)
         self.setMinimumSize(1024, 640)
+        self.setAcceptDrops(True)
         self._build_actions()
         self._build_central(table_model, completer_model)
         self._build_catalog_dock(tree_model)
@@ -120,8 +123,10 @@ class MainWindow(QMainWindow):
                                     tip="Distribuye solo las secciones que el usuario no ha movido manualmente")
 
         self.act_categories = make("Categorías…", "categories")
-        self.act_import_tables = make("Importar tablas (CSV/Excel)…", "import", "Ctrl+I",
-                                      tip="Carga secciones y relaciones desde la plantilla de Excel o CSV")
+        self.act_import_tables = make("Importar tablas o crear mapa desde Excel/CSV…", "import", "Ctrl+I",
+                                      tip="Carga secciones y relaciones desde la plantilla de Excel o CSV. "
+                                          "Sin proyecto abierto crea el mapa directamente (el archivo .specrel "
+                                          "se guarda junto al Excel). También puede arrastrar el archivo aquí.")
         self.act_export_tables = make("Exportar tablas a Excel…", "export-svg",
                                       tip="Guarda secciones y relaciones en el formato de la plantilla")
         self.act_save_template = make("Guardar plantilla de Excel…", "new",
@@ -238,6 +243,9 @@ class MainWindow(QMainWindow):
 
         # Página de inicio
         welcome = QWidget()
+        welcome.setObjectName("welcomePage")
+        welcome.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.welcome_page = welcome
         wl = QVBoxLayout(welcome)
         wl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title = QLabel(APP_NAME)
@@ -248,7 +256,11 @@ class MainWindow(QMainWindow):
         subtitle.setProperty("role", "subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         buttons = QHBoxLayout()
-        self.welcome_new = QPushButton("Nuevo proyecto…")
+        self.welcome_import = QPushButton("Crear mapa desde Excel/CSV…")
+        self.welcome_import.setToolTip("Elija un archivo de la plantilla: el mapa se crea directamente y el "
+                                       "proyecto se guarda junto al Excel")
+        self.welcome_new = QPushButton("Nuevo proyecto vacío…")
+        self.welcome_new.setProperty("role", "secondary")
         self.welcome_open = QPushButton("Abrir proyecto…")
         self.welcome_open.setProperty("role", "secondary")
         self.welcome_template = QPushButton("Descargar plantilla de Excel…")
@@ -258,11 +270,16 @@ class MainWindow(QMainWindow):
         self.welcome_help = QPushButton("Ver manual de uso")
         self.welcome_help.setProperty("role", "secondary")
         buttons.addStretch(1)
+        buttons.addWidget(self.welcome_import)
         buttons.addWidget(self.welcome_new)
         buttons.addWidget(self.welcome_open)
         buttons.addWidget(self.welcome_template)
         buttons.addWidget(self.welcome_help)
         buttons.addStretch(1)
+        self.drop_hint = QLabel("También puede arrastrar aquí un archivo .xlsx / .csv de la plantilla "
+                                "o un proyecto .specrel")
+        self.drop_hint.setProperty("role", "hint")
+        self.drop_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         recent_label = QLabel("Proyectos recientes")
         recent_label.setProperty("role", "subtitle")
         recent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -273,10 +290,13 @@ class MainWindow(QMainWindow):
         wl.addWidget(subtitle)
         wl.addSpacing(16)
         wl.addLayout(buttons)
+        wl.addSpacing(8)
+        wl.addWidget(self.drop_hint)
         wl.addSpacing(24)
         wl.addWidget(recent_label)
         wl.addWidget(self.recent_list, 0, Qt.AlignmentFlag.AlignHCenter)
         self.stack.addWidget(welcome)
+        self.welcome_import.clicked.connect(self.act_import_tables.trigger)
         self.welcome_new.clicked.connect(self.act_new.trigger)
         self.welcome_open.clicked.connect(self.act_open.trigger)
         self.welcome_template.clicked.connect(self.act_save_template.trigger)
@@ -285,6 +305,9 @@ class MainWindow(QMainWindow):
 
         # Espacio de trabajo
         workspace = QWidget()
+        workspace.setObjectName("workspacePage")
+        workspace.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.workspace_page = workspace
         layout = QVBoxLayout(workspace)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
@@ -353,7 +376,7 @@ class MainWindow(QMainWindow):
                     self.act_delete,
                     self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_zoom_reset, self.act_snap,
                     self.act_grid, self.act_arrange_new, self.act_categories, self.act_import_catalog,
-                    self.act_clear_catalog, self.act_import_tables, self.act_export_tables,
+                    self.act_clear_catalog, self.act_export_tables,
                     self.act_replace_catalog, self.act_reset_catalog, self.act_apply_catalog_categories,
                     self.act_export_catalog, self.act_add_catalog_entry,
                     self.act_show_extras, self.act_responsibles, self.act_statuses,
@@ -385,6 +408,49 @@ class MainWindow(QMainWindow):
 
     def set_zoom_label(self, scale: float) -> None:
         self.zoom_label.setText(f"{scale * 100:.0f} %")
+
+    # ------------------------------------------------------------------ arrastrar archivos
+    @staticmethod
+    def dropped_paths(event) -> list[str]:
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return []
+        return [u.toLocalFile() for u in mime.urls() if u.isLocalFile() and is_droppable(u.toLocalFile())]
+
+    def set_drop_active(self, on: bool) -> None:
+        """Resalta la página visible mientras se arrastra un archivo aceptable sobre la ventana."""
+        for page in (self.welcome_page, self.workspace_page):
+            if bool(page.property("dropActive")) != on:
+                page.setProperty("dropActive", on)
+                page.style().unpolish(page)
+                page.style().polish(page)
+                page.update()
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if self.dropped_paths(event):
+            event.acceptProposedAction()
+            self.set_drop_active(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if self.dropped_paths(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802
+        self.set_drop_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        self.set_drop_active(False)
+        paths = self.dropped_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.filesDropped.emit(paths)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.aboutToClose.emit()

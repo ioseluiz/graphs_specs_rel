@@ -20,6 +20,7 @@ class GraphView(QGraphicsView):
     connectModeChanged = pyqtSignal(bool)
     zoomChanged = pyqtSignal(float)
     sectionsDropped = pyqtSignal(object, object)  # list[code_key], QPointF (escena)
+    filesDropped = pyqtSignal(list)                # rutas locales soltadas sobre el mapa (las trata la ventana)
     invertRequested = pyqtSignal(int)              # relation_id (tecla R sobre una flecha seleccionada)
 
     def __init__(self, scene: GraphScene, parent=None) -> None:
@@ -50,13 +51,13 @@ class GraphView(QGraphicsView):
 
     # ------------------------------------------------------------------ arrastre desde el catálogo
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if event.mimeData().hasFormat(MIME_SECTION):
+        if event.mimeData().hasFormat(MIME_SECTION) or event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        if event.mimeData().hasFormat(MIME_SECTION):
+        if event.mimeData().hasFormat(MIME_SECTION) or event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
@@ -68,6 +69,13 @@ class GraphView(QGraphicsView):
             self.sectionsDropped.emit(keys, self.mapToScene(event.position().toPoint()))
             event.acceptProposedAction()
             return
+        if event.mimeData().hasUrls():
+            # Un hijo que acepta drops no los propaga a la ventana: se reenvían explícitamente.
+            paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+            if paths:
+                event.acceptProposedAction()
+                self.filesDropped.emit(paths)
+                return
         super().dropEvent(event)
 
     # ------------------------------------------------------------------ modo conectar

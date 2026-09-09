@@ -4,7 +4,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QObject
 from PyQt6.QtWidgets import QMessageBox
 
-from models.entities import RelationKind, Section, UiKind
+from models.entities import Section, UiKind
 from models.master_catalog import normalize_code
 from models.project_model import ProjectModel
 from models.relation_normalizer import DuplicateRelationError, SelfRelationError, denormalize, split_code_title
@@ -30,8 +30,7 @@ class RelationsController(QObject):
     # ------------------------------------------------------------------ utilidades
     def describe(self, rel) -> str:
         sa, sb = self.project.section(rel.source_id), self.project.section(rel.target_id)
-        arrow = "↔" if rel.kind is RelationKind.MUTUAL else "→"
-        return f"{sa.code if sa else '?'} {arrow} {sb.code if sb else '?'}"
+        return f"{sa.code if sa else '?'} → {sb.code if sb else '?'}"
 
     def _announce_change(self, before: str, relation_id: int) -> None:
         rel = self.project.relation(relation_id)
@@ -130,36 +129,18 @@ class RelationsController(QObject):
         return True
 
     def _handle_duplicate(self, exc: DuplicateRelationError, a_id: int, kind: UiKind, b_id: int) -> bool:
+        """Solo choca la MISMA dirección: la inversa (B → A) es otra flecha y se crea sin preguntar."""
         existing = exc.existing
         sa = self.project.section(existing.source_id)
         sb = self.project.section(existing.target_id)
         label_a = sa.code if sa else "?"
         label_b = sb.code if sb else "?"
-        attempted_kind = exc.attempted[2]
-        if existing.kind is RelationKind.MUTUAL:
-            QMessageBox.information(
-                self.window, "Relación duplicada",
-                f"Ya existe una referencia mutua entre {label_a} y {label_b}.")
-            self.window.table_view.select_relations([existing.id])
-            return False
-        same_direction = (exc.attempted[0], exc.attempted[1]) == (existing.source_id, existing.target_id)
-        if attempted_kind is RelationKind.REF and same_direction:
-            QMessageBox.information(
-                self.window, "Relación duplicada",
-                f"La relación {label_a} → {label_b} ya está registrada.")
-            self.window.table_view.select_relations([existing.id])
-            return False
-        answer = QMessageBox.question(
-            self.window, "Relación existente",
-            f"Ya existe la relación {label_a} → {label_b}.\n\n"
-            "¿Desea convertirla en una referencia mutua ↔?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            rel = self.project.make_mutual(existing.id)
-            self.window.table_view.select_relations([rel.id])
-            self.window.show_status(f"Relación {label_a} ↔ {label_b} convertida en mutua.")
-            return True
+        QMessageBox.information(
+            self.window, "Relación duplicada",
+            f"La relación {label_a} → {label_b} ya está registrada.\n\n"
+            f"Si desea la referencia en sentido contrario, agregue {label_b} → {label_a}: "
+            "cada dirección es una flecha independiente.")
+        self.window.table_view.select_relations([existing.id])
         return False
 
     # ------------------------------------------------------------------ edición desde la tabla
@@ -198,7 +179,9 @@ class RelationsController(QObject):
             sb = self.project.section(exc.existing.target_id)
             QMessageBox.information(
                 self.window, "Relación duplicada",
-                f"Ya existe otra relación entre {sa.code if sa else '?'} y {sb.code if sb else '?'}.")
+                f"Ya existe la relación {sa.code if sa else '?'} → {sb.code if sb else '?'} "
+                "(es otra flecha del mapa).")
+            self.window.table_view.select_relations([exc.existing.id])
         return False
 
     def set_kind(self, relation_id: int, ui_kind: UiKind) -> None:
@@ -210,22 +193,20 @@ class RelationsController(QObject):
         if self.update_relation(relation_id, a_id, ui_kind, b_id):
             self._announce_change(before, relation_id)
 
-    def set_direction(self, relation_id: int, source_id: int, target_id: int) -> None:
-        """Convierte en dirigida con el sentido indicado (útil desde una mutua)."""
+    def add_reverse(self, relation_id: int) -> None:
+        """Agrega la flecha en sentido contrario (B → A) a una relación existente."""
         rel = self.project.relation(relation_id)
         if rel is None:
             return
-        before = self.describe(rel)
-        if self.update_relation(relation_id, source_id, UiKind.REFERENCES, target_id):
-            self._announce_change(before, relation_id)
+        if self.add_relation(rel.target_id, UiKind.REFERENCES, rel.source_id):
+            new = self.project.reverse_relation(relation_id)
+            if new is not None:
+                self.window.show_status(f"Flecha inversa agregada: {self.describe(new)}. "
+                                        f"Ahora hay dos flechas entre estas secciones.", 8000)
 
     def invert(self, relation_id: int) -> None:
         rel = self.project.relation(relation_id)
         if rel is None:
-            return
-        if rel.kind is RelationKind.MUTUAL:
-            self.window.show_status("Una referencia mutua no tiene dirección que invertir; cambie el tipo "
-                                    "desde el menú de la flecha o la celda Relación.", 6000)
             return
         before = self.describe(rel)
         if self.update_relation(relation_id, rel.target_id, UiKind.REFERENCES, rel.source_id):
@@ -237,11 +218,8 @@ class RelationsController(QObject):
         if rel is None:
             return False
         if confirm:
-            sa, sb = self.project.section(rel.source_id), self.project.section(rel.target_id)
-            arrow = "↔" if rel.kind is RelationKind.MUTUAL else "→"
             answer = QMessageBox.question(
-                self.window, "Eliminar relación",
-                f"¿Eliminar la relación {sa.code if sa else '?'} {arrow} {sb.code if sb else '?'}?")
+                self.window, "Eliminar relación", f"¿Eliminar la relación {self.describe(rel)}?")
             if answer != QMessageBox.StandardButton.Yes:
                 return False
         self.project.remove_relation(relation_id)

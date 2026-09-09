@@ -1,9 +1,9 @@
 """Normalización de relaciones entre la forma de la interfaz y la persistida.
 
-La base de datos guarda una única relación por par no ordenado de secciones:
+La base de datos guarda una única relación por par DIRIGIDO de secciones:
 - "Hace referencia a →"      A → B   se guarda como (A, B, 'ref')
 - "← Es referenciada por"    B → A   se guarda como (B, A, 'ref')
-- "Referencia mutua ↔"       A ↔ B   se guarda como (min, max, 'mutual')
+Si A referencia a B y B referencia a A, existen dos relaciones (dos flechas) independientes.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class SelfRelationError(ValueError):
 
 class DuplicateRelationError(ValueError):
     def __init__(self, existing: Relation, attempted: tuple[int, int, RelationKind]) -> None:
-        super().__init__("Ya existe una relación entre estas dos secciones.")
+        super().__init__("Esta relación ya está registrada en esa dirección.")
         self.existing = existing
         self.attempted = attempted
 
@@ -71,18 +71,16 @@ def format_label(code: str, title: str | None) -> str:
 def normalize(a_id: int, kind: UiKind, b_id: int) -> tuple[int, int, RelationKind]:
     if a_id == b_id:
         raise SelfRelationError(a_id)
-    if kind is UiKind.MUTUAL:
-        return min(a_id, b_id), max(a_id, b_id), RelationKind.MUTUAL
     if kind is UiKind.REFERENCED_BY:
         return b_id, a_id, RelationKind.REF
     return a_id, b_id, RelationKind.REF
 
 
 def denormalize(rel: Relation) -> tuple[int, UiKind, int]:
-    """Forma canónica para mostrar: 'source → target' o 'lo ↔ hi'."""
-    ui = UiKind.MUTUAL if rel.kind is RelationKind.MUTUAL else UiKind.REFERENCES
-    return rel.source_id, ui, rel.target_id
+    """Forma canónica para mostrar: 'source → target'."""
+    return rel.source_id, UiKind.REFERENCES, rel.target_id
 
 
 def same_pair(rel: Relation, a_id: int, b_id: int) -> bool:
+    """Misma pareja de secciones, sin importar la dirección."""
     return {rel.source_id, rel.target_id} == {a_id, b_id}

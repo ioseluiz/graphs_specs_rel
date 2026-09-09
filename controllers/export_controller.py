@@ -116,9 +116,16 @@ def paint_projected_scene(painter: QPainter, scene: dict) -> None:
     for e in edges:
         a, b = nodes[e["a"]], nodes[e["b"]]
         pa, pb = QPointF(a["x"], a["y"]), QPointF(b["x"], b["y"])
+        if e.get("paired"):
+            # Flechas opuestas entre los mismos nodos: desplazar 3 px en perpendicular, una a cada lado.
+            d = pb - pa
+            length = (d.x() ** 2 + d.y() ** 2) ** 0.5 or 1.0
+            sign = 1.0 if e["a"] < e["b"] else -1.0
+            normal = QPointF(-d.y() / length, d.x() / length) * (3.0 * sign)
+            pa, pb = pa + normal, pb + normal
         mid = pa + (pb - pa) * 0.6
         strong = 0.95 if e["visible"] else 0.08
-        weak = (0.95 if e["mutual"] else 0.35) if e["visible"] else 0.08
+        weak = 0.35 if e["visible"] else 0.08
         c1, c2 = QColor(edge_color), QColor(edge_color)
         c1.setAlphaF(weak)
         c2.setAlphaF(strong)

@@ -32,11 +32,6 @@ def test_normalize_referenced_by_swaps():
     assert normalize(1, UiKind.REFERENCED_BY, 2) == (2, 1, RelationKind.REF)
 
 
-def test_normalize_mutual_is_canonical():
-    assert normalize(5, UiKind.MUTUAL, 2) == (2, 5, RelationKind.MUTUAL)
-    assert normalize(2, UiKind.MUTUAL, 5) == (2, 5, RelationKind.MUTUAL)
-
-
 def test_self_relation():
     with pytest.raises(SelfRelationError):
         normalize(3, UiKind.REFERENCES, 3)
@@ -45,10 +40,8 @@ def test_self_relation():
 def test_denormalize_roundtrip():
     rel = Relation(1, 7, 3, RelationKind.REF)
     a, kind, b = denormalize(rel)
-    assert normalize(a, kind, b) == (7, 3, RelationKind.REF)
-    rel_m = Relation(2, 3, 7, RelationKind.MUTUAL)
-    a, kind, b = denormalize(rel_m)
-    assert kind is UiKind.MUTUAL and normalize(a, kind, b) == (3, 7, RelationKind.MUTUAL)
+    assert kind is UiKind.REFERENCES and normalize(a, kind, b) == (7, 3, RelationKind.REF)
+    assert not hasattr(UiKind, "MUTUAL") and not hasattr(RelationKind, "MUTUAL")
 
 
 def test_split_code_title():

@@ -658,19 +658,22 @@ class ProjectModel(QObject):
         return removal
 
     # ------------------------------------------------------------------ relaciones
-    def add_relation(self, a_id: int, kind: UiKind, b_id: int) -> Relation:
-        """Lanza SelfRelationError o DuplicateRelationError(existing)."""
+    def add_relation(self, a_id: int, kind: UiKind, b_id: int, notes: str | None = None) -> Relation:
+        """Lanza SelfRelationError o DuplicateRelationError(existing) si ya existe esa misma dirección.
+
+        La relación inversa (B → A) es independiente: se puede agregar sin conflicto.
+        """
         assert self.db is not None
         source_id, target_id, rk = normalize(a_id, kind, b_id)
-        existing = self.relations_repo.find_pair(a_id, b_id)
+        existing = self.relations_repo.find_directed(source_id, target_id)
         if existing is not None:
             raise DuplicateRelationError(existing, (source_id, target_id, rk))
         try:
             with self.db.transaction():
-                rel = self.relations_repo.insert(source_id, target_id, rk)
+                rel = self.relations_repo.insert(source_id, target_id, rk, (notes or "").strip() or None)
                 self.db.touch()
         except sqlite3.IntegrityError as exc:
-            existing = self.relations_repo.find_pair(a_id, b_id)
+            existing = self.relations_repo.find_directed(source_id, target_id)
             if existing is not None:
                 raise DuplicateRelationError(existing, (source_id, target_id, rk)) from exc
             raise
@@ -687,12 +690,11 @@ class ProjectModel(QObject):
         source_id, target_id, rk = normalize(a_id, kind, b_id)
         if (source_id, target_id, rk) == (old.source_id, old.target_id, old.kind):
             return old
-        clash = self.relations_repo.find_pair(a_id, b_id)
+        clash = self.relations_repo.find_directed(source_id, target_id)
         if clash is not None and clash.id != relation_id:
             raise DuplicateRelationError(clash, (source_id, target_id, rk))
-        same_pair = {old.source_id, old.target_id} == {a_id, b_id}
-        # Si solo se invierte la dirección, la geometría se invalida porque los puertos cambian de nodo.
-        keep_geometry = same_pair and (source_id, target_id) == (old.source_id, old.target_id)
+        # Si se invierte la dirección, la geometría se invalida porque los puertos cambian de nodo.
+        keep_geometry = (source_id, target_id) == (old.source_id, old.target_id)
         with self.db.transaction():
             self.relations_repo.update_endpoints(relation_id, source_id, target_id, rk, keep_geometry)
             self.db.touch()
@@ -704,15 +706,33 @@ class ProjectModel(QObject):
         self._schedule_graph_changed()
         return new
 
-    def make_mutual(self, relation_id: int) -> Relation:
-        rel = self._relations[relation_id]
-        return self.update_relation(relation_id, rel.source_id, UiKind.MUTUAL, rel.target_id)
-
     def invert_relation(self, relation_id: int) -> Relation:
+        """Cambia A → B por B → A. Lanza DuplicateRelationError si B → A ya existe como otra flecha."""
         rel = self._relations[relation_id]
-        if rel.kind is RelationKind.MUTUAL:
-            return rel
         return self.update_relation(relation_id, rel.target_id, UiKind.REFERENCES, rel.source_id)
+
+    def reverse_relation(self, relation_id: int) -> Relation | None:
+        """La flecha en sentido contrario (B → A) si existe."""
+        rel = self._relations.get(relation_id)
+        if rel is None:
+            return None
+        return next((r for r in self._relations.values()
+                     if r.source_id == rel.target_id and r.target_id == rel.source_id), None)
+
+    def set_relation_notes(self, relation_id: int, notes: str | None) -> Relation:
+        assert self.db is not None
+        text = (notes or "").strip() or None
+        rel = self._relations[relation_id]
+        if rel.notes == text:
+            return rel
+        with self.db.transaction():
+            self.relations_repo.update_notes(relation_id, text)
+            self.db.touch()
+        new = self.relations_repo.get(relation_id)
+        assert new is not None
+        self._relations[relation_id] = new
+        self.relationUpdated.emit(relation_id)
+        return new
 
     def set_relation_geometry(self, relation_id: int, waypoints: list[tuple[float, float]] | None,
                               source_port: Side | None, target_port: Side | None) -> None:

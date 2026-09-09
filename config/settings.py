@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 APP_NAME = "SpecRel"
 APP_DISPLAY_NAME = "SpecRel — Referencias cruzadas de especificaciones"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.3.0"
 APP_STAGE = "beta"   # "" cuando salga de pruebas
 APP_VERSION_LABEL = f"{APP_VERSION} ({APP_STAGE})" if APP_STAGE else APP_VERSION
 APP_ORG = "ACP"

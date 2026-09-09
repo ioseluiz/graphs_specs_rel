@@ -156,6 +156,12 @@ QGroupBox::title {
 QLabel[role="title"] { font-size: 13pt; font-weight: 600; color: #1E1E1E; }
 QLabel[role="subtitle"] { font-size: 10pt; color: #5F6B7A; }
 QLabel[role="hint"] { font-size: 9pt; color: #5F6B7A; }
+/* Página resaltada mientras se arrastra un archivo aceptable (.specrel, .xlsx, .csv) */
+QWidget#welcomePage[dropActive="true"], QWidget#workspacePage[dropActive="true"] {
+    border: 2px dashed #1F4E79;
+    border-radius: 10px;
+    background-color: #E3ECF5;
+}
 QLabel[role="section-header"] {
     background-color: #1F4E79;
     color: #FFFFFF;

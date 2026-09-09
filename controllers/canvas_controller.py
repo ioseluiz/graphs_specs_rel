@@ -6,7 +6,7 @@ from PyQt6.QtGui import QAction, QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import QColorDialog, QMenu, QMessageBox
 
 from config import palette
-from models.entities import SIDES, RelationKind, Section, UiKind
+from models.entities import SIDES, Section, UiKind
 from models.layout_engine import initial_layout_2d
 from models.project_model import ProjectModel
 from utils.debounce import Debouncer
@@ -161,6 +161,11 @@ class CanvasController(QObject):
         for kind in UiKind:
             act = menu.addAction(f"{sa.code} {kind.value} {sb.code}")
             act.setData(kind)
+            existing = self.project.relations_repo.find_directed(
+                *((source_id, target_id) if kind is UiKind.REFERENCES else (target_id, source_id)))
+            if existing is not None:
+                act.setText(act.text() + "   (ya existe)")
+                act.setEnabled(False)
         chosen = menu.exec(self.view.mapToGlobal(self.view.mapFromScene(
             self.scene.nodes[target_id].scene_rect().center())))
         if chosen is not None:
@@ -176,10 +181,8 @@ class CanvasController(QObject):
             return
         node_ids = set(self.scene.selected_node_ids())
         edge_ids = set(self.scene.selected_edge_ids())
-        if edge_ids and not node_ids and not self._edge_hint_shown:
-            self._edge_hint_shown = True
-            self.window.show_status("Flecha seleccionada: la tecla R invierte la dirección; clic derecho para "
-                                    "cambiar el tipo, la ruta o eliminarla.", 9000)
+        if edge_ids and not node_ids:
+            self._announce_edge_selection(edge_ids)
         for sid in node_ids:
             edge_ids.update(r.id for r in self.project.relations_for(sid))
         self._syncing_selection = True
@@ -187,6 +190,30 @@ class CanvasController(QObject):
             self.window.table_view.select_relations(sorted(edge_ids), scroll=bool(edge_ids))
         finally:
             self._syncing_selection = False
+
+    def _announce_edge_selection(self, edge_ids: set[int]) -> None:
+        """Barra de estado: qué flecha está seleccionada (códigos) y, la primera vez, cómo operarla."""
+        parts = []
+        for rid in sorted(edge_ids)[:3]:
+            rel = self.project.relation(rid)
+            if rel is not None:
+                parts.append(self.relations.describe(rel))
+        if len(edge_ids) > 3:
+            parts.append(f"… y {len(edge_ids) - 3} más")
+        text = "Flecha seleccionada: " + "  ·  ".join(parts) if len(edge_ids) == 1 else \
+            f"{len(edge_ids)} flechas seleccionadas: " + "  ·  ".join(parts)
+        if not self._edge_hint_shown:
+            self._edge_hint_shown = True
+            text += "   —   Tecla R invierte la dirección; clic derecho: flecha inversa, ruta o eliminar."
+        self.window.show_status(text, 9000)
+
+    def select_relation(self, relation_id: int) -> None:
+        edge = self.scene.edges.get(relation_id)
+        if edge is None:
+            return
+        self.scene.clearSelection()
+        edge.setSelected(True)
+        self.view.ensureVisible(edge)
 
     def _on_table_selection(self, relation_ids: list[int]) -> None:
         if self._syncing_selection:
@@ -443,22 +470,20 @@ class CanvasController(QObject):
         sa, sb = self.project.section(rel.source_id), self.project.section(rel.target_id)
         code_a, code_b = (sa.code if sa else "?"), (sb.code if sb else "?")
         menu = QMenu(self.window)
-        if rel.kind is RelationKind.MUTUAL:
-            menu.addSection(f"{code_a} ↔ {code_b}  (referencia mutua)")
-            current = menu.addAction(f"✓ Referencia mutua {code_a} ↔ {code_b}  (actual)")
-            current.setEnabled(False)
-            menu.addAction(f"Convertir en dirigida: {code_a} → {code_b}",
-                           lambda: self.relations.set_direction(relation_id, rel.source_id, rel.target_id))
-            menu.addAction(f"Convertir en dirigida: {code_b} → {code_a}",
-                           lambda: self.relations.set_direction(relation_id, rel.target_id, rel.source_id))
+        menu.addSection(f"{code_a} → {code_b}  ({code_a} hace referencia a {code_b})")
+        current = menu.addAction(f"✓ {code_a} → {code_b}  (actual)")
+        current.setEnabled(False)
+        reverse = self.project.reverse_relation(relation_id)
+        act_invert = menu.addAction(f"⇄ Invertir dirección: {code_b} → {code_a}   (tecla R)",
+                                    lambda: self.relations.invert(relation_id))
+        if reverse is not None:
+            act_invert.setEnabled(False)
+            act_invert.setText(f"⇄ Invertir dirección   (ya existe la flecha {code_b} → {code_a})")
+            menu.addAction(f"Seleccionar la flecha inversa {code_b} → {code_a}",
+                           lambda: self.select_relation(reverse.id))
         else:
-            menu.addSection(f"{code_a} → {code_b}  ({code_a} hace referencia a {code_b})")
-            current = menu.addAction(f"✓ {code_a} → {code_b}  (actual)")
-            current.setEnabled(False)
-            menu.addAction(f"⇄ Invertir dirección: {code_b} → {code_a}   (tecla R)",
-                           lambda: self.relations.invert(relation_id))
-            menu.addAction(f"Convertir en referencia mutua {code_a} ↔ {code_b}",
-                           lambda: self.relations.set_kind(relation_id, UiKind.MUTUAL))
+            menu.addAction(f"＋ Agregar flecha inversa {code_b} → {code_a}  (dos flechas)",
+                           lambda: self.relations.add_reverse(relation_id))
         menu.addSeparator()
         menu.addAction("Agregar punto de quiebre aquí",
                        lambda: edge.insert_waypoint_at(self.view.mapToScene(self.view.mapFromGlobal(global_pos))))

@@ -73,14 +73,38 @@ def test_referenced_by_is_stored_canonically(app):
     assert rel.kind is RelationKind.REF
 
 
-def test_duplicate_inverse_becomes_mutual(app):
+def test_inverse_relation_creates_second_arrow(app):
     project, window, _c, table_model = app
     _add(window, "A", UiKind.REFERENCES, "B")
-    _add(window, "B", UiKind.REFERENCES, "A")  # QMessageBox.question -> Yes (convertir en mutua)
-    assert table_model.rowCount() == 1
-    assert project.relations()[0].kind is RelationKind.MUTUAL
-    edge = next(iter(window.scene.edges.values()))
-    assert len(edge._arrows) == 2
+    _add(window, "B", UiKind.REFERENCES, "A")  # sentido contrario: otra flecha, sin preguntar
+    assert table_model.rowCount() == 2
+    assert all(r.kind is RelationKind.REF for r in project.relations())
+    edges = list(window.scene.edges.values())
+    assert len(edges) == 2 and all(len(e._arrows) == 1 for e in edges)
+    # Salen por arriba/derecha y entran por abajo/izquierda: las dos flechas no comparten puertos.
+    assert edges[0].effective_ports != edges[1].effective_ports
+    assert {(e.source.section_id, e.target.section_id) for e in edges} == {
+        (project.section_by_code("A").id, project.section_by_code("B").id),
+        (project.section_by_code("B").id, project.section_by_code("A").id)}
+    # La misma dirección otra vez sí es duplicado (QMessageBox.information parcheado): nada cambia.
+    _add(window, "A", UiKind.REFERENCES, "B")
+    assert table_model.rowCount() == 2
+
+
+def test_selected_edge_highlights_linked_sections(app):
+    project, window, _c, _t = app
+    _add(window, "A", UiKind.REFERENCES, "B")
+    _add(window, "B", UiKind.REFERENCES, "C")
+    a, b, c = (project.section_by_code(x) for x in "ABC")
+    nodes = window.scene.nodes
+    rel_ab = next(r for r in project.relations() if r.source_id == a.id)
+    edge = window.scene.edges[rel_ab.id]
+    window.scene.clearSelection()
+    edge.setSelected(True)
+    assert nodes[a.id].linked and nodes[b.id].linked and not nodes[c.id].linked
+    assert f"{a.code} → {b.code}" in window.statusBar().currentMessage()
+    window.scene.clearSelection()
+    assert not any(n.linked for n in nodes.values())
 
 
 def test_move_node_persists_and_edges_follow(app, qtbot):
@@ -110,14 +134,16 @@ def test_delete_relation_from_table_removes_edge(app):
     assert len(window.scene.nodes) == 2  # las secciones permanecen
 
 
-def test_change_kind_from_table_updates_edge(app):
-    project, window, _c, table_model = app
+def test_add_reverse_from_edge_menu_action(app):
+    project, window, controller, table_model = app
     _add(window, "A", UiKind.REFERENCES, "B")
-    idx = table_model.index(0, COL_KIND)
-    table_model.setData(idx, UiKind.MUTUAL.value, Qt.ItemDataRole.EditRole)
-    rel = project.relations()[0]
-    assert rel.kind is RelationKind.MUTUAL
-    assert window.scene.edges[rel.id].kind is RelationKind.MUTUAL
+    rid = project.relations()[0].id
+    controller.relations.add_reverse(rid)
+    assert table_model.rowCount() == 2
+    back = project.reverse_relation(rid)
+    assert back is not None and back.id in window.scene.edges
+    controller.relations.add_reverse(rid)   # ya existe: sin cambios (information parcheado)
+    assert table_model.rowCount() == 2
 
 
 def test_remove_section_removes_node_and_edges(app):
@@ -269,7 +295,7 @@ def test_help_dialog_contextual_topic_and_first_time_hint(app):
     dialog = help_ctrl.dialog()
     assert dialog.isVisible() and dialog.current_topic == "vista3d"
     dialog.show_topic("relaciones")
-    assert "Referencia mutua" in dialog.browser.toPlainText()
+    assert "Cada dirección es una flecha" in dialog.browser.toPlainText()
     dialog.search.setText("conectar")
     assert dialog.topics_list.count() >= 2
     dialog.close()
@@ -298,7 +324,7 @@ def test_about_dialog_shows_version_and_developer(app):
 
 def test_invert_and_kind_change_paths(app, qtbot):
     from PyQt6.QtCore import Qt
-    from models.relations_table_model import COL_ACTIONS, COL_KIND, INVERT_OPTION, ROLE_IS_MUTUAL
+    from models.relations_table_model import COL_KIND, INVERT_OPTION
 
     project, window, controller, table_model = app
     _add(window, "A", UiKind.REFERENCES, "B")
@@ -323,13 +349,13 @@ def test_invert_and_kind_change_paths(app, qtbot):
     edge.setSelected(True)
     qtbot.keyClick(window.view, Qt.Key.Key_R)
     assert direction() == ("B", "A", RelationKind.REF)
-    # 4) convertir en mutua y volver a dirigida con sentido elegido
-    controller.relations.set_kind(rid, UiKind.MUTUAL)
-    assert direction()[2] is RelationKind.MUTUAL
-    assert table_model.index(0, COL_ACTIONS).data(ROLE_IS_MUTUAL) is True
-    controller.relations.invert(rid)  # no aplica a mutua: sin cambio
-    assert direction()[2] is RelationKind.MUTUAL
-    controller.relations.set_direction(rid, a.id, b.id)
+    # 4) con la flecha inversa presente, invertir queda bloqueado (sería un duplicado exacto)
+    controller.relations.add_reverse(rid)
+    assert table_model.rowCount() == 2
+    controller.relations.invert(rid)  # QMessageBox.information parcheado: sin cambio
+    assert direction() == ("B", "A", RelationKind.REF)
+    controller.relations.delete_relation(project.reverse_relation(rid).id, confirm=False)
+    controller.relations.invert(rid)
     assert direction() == ("A", "B", RelationKind.REF)
     # El combo de edición no ofrece «← Es referenciada por» en una relación existente
     delegate = window.table_view._kind_delegate

@@ -15,6 +15,22 @@ relaciones entre secciones de especificaciones tipo MasterFormat de un proyecto.
   guardan automáticamente (la barra de estado muestra la hora del último guardado); "Guardar" (Ctrl+S) solo
   confirma, y "Guardar copia como…" duplica el proyecto en otro archivo (no admite el mismo archivo abierto).
 - **Exportación** del mapa a PNG, SVG o portapapeles.
+- **Crear el mapa desde Excel/CSV**: arrastre la plantilla sobre la ventana (o «Abrir con… SpecRel») y el
+  proyecto `.specrel` se crea junto al Excel con las secciones acomodadas automáticamente.
+
+## Novedades 0.3.0 (beta)
+
+- **Dos flechas por par de secciones**: `A → B` y `B → A` son relaciones independientes, cada una con su inicio
+  y su punta. Desaparece el tipo «Referencia mutua ↔»; los proyectos anteriores se migran solos (esquema v4):
+  cada mutua pasa a ser dos flechas. Corrige la importación del cliente en la que `31 33 23 → 01 13 00` se
+  perdía por existir `01 13 00 → 31 33 23`.
+- **Selección visible**: la flecha seleccionada se dibuja con halo y marcador de origen, y las dos secciones
+  que une se remarcan (borde azul, relleno más oscuro). La barra de estado indica `A → B`.
+- **Crear mapa desde Excel/CSV sin proyecto previo**: arrastrar y soltar sobre la ventana o el lienzo, botón
+  en la pantalla de inicio, «Abrir con…» desde Windows. Con proyecto abierto pregunta «agregar» o «crear nuevo».
+- **Importación transparente**: lista de filas omitidas con motivo («repite la fila 18»), botón *Copiar
+  detalle*, columna *Observaciones* en Relaciones (se ve en el tooltip de la flecha) y hoja *Proyecto*
+  (código y nombre) en la plantilla.
 
 ## Ejecutar en desarrollo
 
@@ -139,22 +155,33 @@ Resumen (indicadores y tablas por estatus, responsable y categoría), Secciones 
 datos, responsables, observaciones, grados de referencia), Por responsable (una fila por sección y unidad),
 Relaciones y, opcionalmente, Mapa con la imagen del mapa 2D. Generado por `models/report_export.py`.
 
-## Armar un proyecto desde Excel o CSV
+## Crear un mapa desde Excel o CSV
 
 1. **Archivo → Tablas → Guardar plantilla de Excel…** (también desde la pantalla de inicio). La plantilla
-   tiene las hojas `Secciones` (Número, Descripción, Categoría, Color), `Relaciones` (Sección A, Relación,
-   Sección B) e `Instrucciones`, con filas de ejemplo. La columna Relación tiene lista desplegable.
+   tiene las hojas `Secciones` (Número, Descripción, Categoría, Color, Estatus, Avance, Responsables,
+   Observaciones), `Relaciones` (Sección A, Relación, Sección B, Observaciones), `Proyecto` (Código y Nombre,
+   opcional) e `Instrucciones`, con filas de ejemplo. La columna Relación tiene lista desplegable.
 2. Complete las tablas. Las secciones se pueden escribir como `03 30 00` o `03 30 00 - Concreto`; en
-   Relación se aceptan los tres textos de la app y también `->`, `<-`, `<->` o `mutua`.
-3. Cree o abra un proyecto y use **Archivo → Tablas → Importar tablas (CSV/Excel)…** (Ctrl+I). Las
-   secciones nuevas se crean, las existentes se actualizan y las categorías desconocidas se crean. Nada
-   se elimina. Al final se muestra un resumen.
-4. **Exportar tablas a Excel…** guarda el proyecto actual en el mismo formato, editable y re-importable.
+   Relación se aceptan los dos textos de la app y también `->` y `<-`. Si dos secciones se referencian entre
+   sí, escriba dos filas (A → B y B → A). El texto antiguo `mutua`/`<->` se sigue aceptando y genera las dos.
+3. **Arrastre el archivo sobre la ventana** (o *Crear mapa desde Excel/CSV…* en la pantalla de inicio, Ctrl+I,
+   o «Abrir con… → SpecRel» desde el Explorador). Sin proyecto abierto, se crea `<nombre del Excel>.specrel`
+   junto al archivo (código y nombre desde la hoja `Proyecto` o el nombre del archivo), se cargan las tablas y
+   se acomodan las secciones automáticamente. Si el `.specrel` ya existe: abrirlo y agregar, reemplazar o
+   elegir otra ruta. Con un proyecto abierto: «Agregar al proyecto abierto» o «Crear un mapa nuevo».
+4. Al importar sobre un proyecto existente, las secciones nuevas se crean, las existentes se actualizan y las
+   categorías/estatus/responsables desconocidos se crean. Nada se elimina ni se mueve. El resumen lista las
+   filas omitidas con su motivo y ofrece *Copiar detalle*.
+5. **Exportar tablas a Excel…** guarda el proyecto actual en el mismo formato, editable y re-importable.
+
+Lógica pura en `models/project_io.py` (lectura/aplicación de tablas) y `models/project_bootstrap.py` (ruta y
+metadatos del proyecto nuevo, clasificación de archivos arrastrados).
 
 ## Convenciones del modelo
 
-- Se guarda una sola relación por par de secciones. "← Es referenciada por" se almacena invertida como
-  "Hace referencia a →". Registrar la relación inversa a una existente propone convertirla en mutua.
+- Se guarda una relación por **par dirigido** de secciones (índice único `source_id, target_id`): `A → B` y
+  `B → A` son dos flechas independientes; repetir la misma dirección se rechaza. "← Es referenciada por" se
+  almacena invertida como "Hace referencia a →". Esquema v4; la migración divide cada antigua «mutua» en dos.
 - *Impacto*: si **B** cambia, se ven afectadas las secciones que hacen referencia a B (ancestros en el
   grafo). "Depende de" lista las secciones a las que B hace referencia.
 

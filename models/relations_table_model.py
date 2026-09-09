@@ -4,7 +4,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal
 
 from config import palette
-from models.entities import RelationKind, UiKind
+from models.entities import UiKind
 from models.project_model import ProjectModel
 from models.relation_normalizer import denormalize
 
@@ -20,7 +20,6 @@ ROLE_BORDER = Qt.ItemDataRole.UserRole + 6
 ROLE_UI_KIND = Qt.ItemDataRole.UserRole + 7
 ROLE_CODE_A = Qt.ItemDataRole.UserRole + 8
 ROLE_CODE_B = Qt.ItemDataRole.UserRole + 9
-ROLE_IS_MUTUAL = Qt.ItemDataRole.UserRole + 10
 
 INVERT_OPTION = "Invertir dirección (B → A)"   # opción del combo de la celda Relación
 FLASH_COLOR = "#FFF2CC"
@@ -163,8 +162,6 @@ class RelationsTableModel(QAbstractTableModel):
         col = index.column()
         if role == ROLE_RELATION_ID:
             return rid
-        if role == ROLE_IS_MUTUAL:
-            return rel.kind is RelationKind.MUTUAL
         if role in (ROLE_CODE_A, ROLE_CODE_B):
             sec = self.project.section(a_id if role == ROLE_CODE_A else b_id)
             return sec.code if sec else ""

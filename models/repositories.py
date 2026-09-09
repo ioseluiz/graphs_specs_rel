@@ -283,12 +283,15 @@ class RelationRepo(_Repo):
         ).fetchall()
         return [_row_relation(r) for r in rows]
 
-    def find_pair(self, a_id: int, b_id: int) -> Relation | None:
+    def find_directed(self, source_id: int, target_id: int) -> Relation | None:
+        """La relación exacta source → target, si existe (la inversa es otra relación)."""
         row = self.conn.execute(
-            "SELECT * FROM relations WHERE MIN(source_id, target_id) = ? AND MAX(source_id, target_id) = ?",
-            (min(a_id, b_id), max(a_id, b_id)),
+            "SELECT * FROM relations WHERE source_id = ? AND target_id = ?", (source_id, target_id)
         ).fetchone()
         return _row_relation(row) if row else None
+
+    def reverse_of(self, rel: Relation) -> Relation | None:
+        return self.find_directed(rel.target_id, rel.source_id)
 
     def insert(self, source_id: int, target_id: int, kind: RelationKind,
                notes: str | None = None) -> Relation:

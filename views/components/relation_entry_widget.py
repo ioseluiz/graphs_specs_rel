@@ -49,7 +49,7 @@ class RelationEntryWidget(QWidget):
             "La relación define el sentido, sin importar el orden en que se seleccionen las secciones.\n"
             "• Hace referencia a →  : A → B\n"
             "• ← Es referenciada por : B → A\n"
-            "• Referencia mutua ↔  : A ↔ B"
+            "Si ambas se referencian entre sí, registre las dos direcciones: serán dos flechas."
         )
         self.picker_b = SectionPicker(completer_model)
         self.add_button = QPushButton("+ Agregar")

@@ -33,7 +33,10 @@ class ImpactResult:
 
 
 class GraphEngine:
-    """Nodo = section_id. 'ref' -> arista source->target; 'mutual' -> ambas direcciones."""
+    """Nodo = section_id. Cada relación es una arista dirigida source->target (atributo rid = id).
+
+    A->B y B->A son dos aristas distintas con rid distinto; `DiGraph` las distingue por sí solo.
+    """
 
     def __init__(self) -> None:
         self.G = nx.DiGraph()
@@ -67,8 +70,6 @@ class GraphEngine:
 
     def add_relation(self, rel: Relation) -> None:
         self.G.add_edge(rel.source_id, rel.target_id, rid=rel.id, kind=rel.kind.value)
-        if rel.kind is RelationKind.MUTUAL:
-            self.G.add_edge(rel.target_id, rel.source_id, rid=rel.id, kind=rel.kind.value)
 
     def remove_relation(self, rel: Relation) -> None:
         for u, v in ((rel.source_id, rel.target_id), (rel.target_id, rel.source_id)):

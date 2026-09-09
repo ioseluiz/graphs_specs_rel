@@ -14,9 +14,9 @@ def _rel(i: int, s: int, t: int, kind=RelationKind.REF) -> Relation:
 
 def build() -> GraphEngine:
     g = GraphEngine()
-    # 1 -> 2 -> 3, 4 <-> 2, 5 huérfana
+    # 1 -> 2 -> 3, 2 -> 4 y 4 -> 2 (dos flechas), 5 huérfana
     g.rebuild([_sec(i) for i in range(1, 6)],
-              [_rel(10, 1, 2), _rel(11, 2, 3), _rel(12, 2, 4, RelationKind.MUTUAL)])
+              [_rel(10, 1, 2), _rel(11, 2, 3), _rel(12, 2, 4), _rel(13, 4, 2)])
     return g
 
 
@@ -48,14 +48,14 @@ def test_components():
 
 def test_remove_relation_only_removes_own_edges():
     g = build()
-    g.remove_relation(_rel(12, 2, 4, RelationKind.MUTUAL))
-    assert not g.G.has_edge(2, 4) and not g.G.has_edge(4, 2)
+    g.remove_relation(_rel(12, 2, 4))
+    assert not g.G.has_edge(2, 4) and g.G.has_edge(4, 2)   # la flecha inversa sigue
     assert g.G.has_edge(2, 3)
-    assert g.edge_count == 2
+    assert g.edge_count == 3
 
 
 def test_hash_stable_and_sensitive():
     a, b = build(), build()
     assert a.graph_hash() == b.graph_hash()
-    b.add_relation(_rel(13, 5, 1))
+    b.add_relation(_rel(14, 5, 1))
     assert a.graph_hash() != b.graph_hash()

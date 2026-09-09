@@ -5,16 +5,20 @@ izquierda o directamente en el mapa con *Conectar*.
 
 ![Entrada de relaciones](img/entrada.png)
 
-## Los tres tipos
+## Los dos tipos
 
 | Usted elige | Significa | Se dibuja |
 |---|---|---|
 | **Hace referencia a →** | A menciona a B (A → B) | flecha de A hacia B |
 | **← Es referenciada por** | B menciona a A (B → A) | flecha de B hacia A |
-| **Referencia mutua ↔** | ambas se mencionan | flecha con punta en los dos extremos |
 
 El tipo define el sentido sin importar en qué campo puso cada sección. Por eso
 «33 40 00 ← Es referenciada por 31 23 00» se guarda y se muestra como «31 23 00 → 33 40 00».
+
+**Cada dirección es una flecha independiente.** Si A hace referencia a B **y** B hace referencia a A, registre
+las dos relaciones: en el mapa verá dos flechas, cada una con su inicio y su punta. (En versiones anteriores esto
+era una sola línea «mutua» con dos puntas; los proyectos antiguos se convierten automáticamente en dos flechas
+al abrirlos.)
 
 ## Registrar una relación
 
@@ -27,14 +31,19 @@ aparece en el mapa cerca de la otra.
 
 ## Relaciones duplicadas
 
-Solo puede existir **una** relación entre dos secciones:
+Solo puede existir **una** relación por cada dirección entre dos secciones:
 
-- Si repite la misma relación, la app avisa que ya existe.
-- Si registra la **inversa** de una existente (A → B y luego B → A), la app propone convertirla en
-  **mutua ↔**.
-- Si una relación mutua ya existe, no se agrega otra.
+- Si repite exactamente la misma relación (A → B otra vez), la app avisa que ya existe y la selecciona.
+- La relación **inversa** (B → A) no es un duplicado: se agrega como segunda flecha sin preguntar.
+- Desde el mapa, el clic derecho sobre una flecha ofrece **Agregar flecha inversa** cuando aún no existe.
 
-## Invertir la dirección o cambiar el tipo
+## Seleccionar una flecha
+
+Al hacer clic sobre una flecha, esta se dibuja más gruesa con un halo azul y un punto en su origen, y las dos
+secciones que une se remarcan (borde azul y relleno más oscuro). La barra de estado indica «Flecha seleccionada:
+A → B» y la fila correspondiente se selecciona en la tabla. Clic en un espacio vacío quita la selección.
+
+## Invertir la dirección
 
 La fila de la tabla y la flecha del mapa muestran **siempre** la relación como *origen → destino*. Por eso, al
 invertir, las columnas A y B se intercambian y la celda *Relación* sigue diciendo «Hace referencia a →»: el
@@ -44,13 +53,13 @@ cambio sí se aplicó (la barra de estado lo confirma con el antes y el después
 
 Tiene tres caminos:
 
-1. **Icono ⇄ en la fila** (columna de acciones): invierte la dirección con un clic. Aparece atenuado en las
-   relaciones mutuas, que no tienen dirección.
-2. **Celda «Relación»**: un clic abre la lista con *Hace referencia a →*, *Referencia mutua ↔* e
-   *Invertir dirección (B → A)*.
-3. **En el mapa**: clic derecho sobre la flecha muestra la relación actual con sus números y las opciones
-   *Invertir dirección*, *Convertir en referencia mutua* o, si es mutua, *Convertir en dirigida* en cualquiera
-   de los dos sentidos. Con la flecha seleccionada, la tecla **R** también la invierte.
+1. **Icono ⇄ en la fila** (columna de acciones): invierte la dirección con un clic.
+2. **Celda «Relación»**: un clic abre la lista con *Hace referencia a →* e *Invertir dirección (B → A)*.
+3. **En el mapa**: clic derecho sobre la flecha muestra la relación actual con sus números y la opción
+   *Invertir dirección*. Con la flecha seleccionada, la tecla **R** también la invierte.
+
+Si ya existe la flecha en sentido contrario, invertir queda deshabilitado (sería un duplicado exacto); elimine
+una de las dos o selecciónela desde el mismo menú.
 
 ## Editar y eliminar
 
@@ -61,3 +70,5 @@ Tiene tres caminos:
 - En el mapa, clic derecho sobre una flecha: además de lo anterior, *Agregar punto de quiebre*, *Restablecer
   ruta*, *Puerto de salida / entrada* y *Eliminar relación*.
 - Seleccionar una fila resalta la flecha en el mapa, y seleccionar una flecha o nodo resalta sus filas.
+- Las **observaciones** de una relación (columna Observaciones de la plantilla) se muestran al pasar el mouse
+  sobre la flecha.

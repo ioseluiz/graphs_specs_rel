@@ -31,7 +31,8 @@ def _populate(model):
     model.set_section_progress(b.id, 40); model.set_section_responsibles(b.id, [rs["INIO"]])
     model.add_relation(a.id, UiKind.REFERENCES, b.id)
     model.add_relation(c.id, UiKind.REFERENCES, a.id)
-    model.add_relation(d.id, UiKind.MUTUAL, e.id)
+    model.add_relation(d.id, UiKind.REFERENCES, e.id)
+    model.add_relation(e.id, UiKind.REFERENCES, d.id)   # dos flechas opuestas
     return a, b, c, d, e
 
 
@@ -39,7 +40,7 @@ def test_report_has_expected_sheets_and_summary(tmp_path, model):
     _populate(model)
     out = tmp_path / "reporte.xlsx"
     stats = export_report_xlsx(model, out)
-    assert out.exists() and stats.sections == 5 and stats.relations == 3
+    assert out.exists() and stats.sections == 5 and stats.relations == 4
     assert stats.avg_progress == (70 + 40 + 100 + 0 + 0) / 5 and stats.completed == 1
     assert stats.without_responsible == 2
     wb = load_workbook(out)
@@ -48,7 +49,7 @@ def test_report_has_expected_sheets_and_summary(tmp_path, model):
     assert "CC-25-01" in ws["A1"].value and "Proyecto de prueba" in ws["A1"].value
     assert str(datetime.now().year) in ws["A2"].value
     labels = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value for r in range(6, 13)}
-    assert labels["Secciones"] == 5 and labels["Relaciones"] == 3
+    assert labels["Secciones"] == 5 and labels["Relaciones"] == 4
     assert labels["Avance promedio"] == 42 and labels["Secciones al 100 %"] == 1
     assert labels["Secciones sin responsable"] == 2
     texts = [str(ws.cell(row=r, column=1).value) for r in range(1, ws.max_row + 1)]
@@ -91,7 +92,7 @@ def test_by_responsible_and_relations_sheets(tmp_path, model):
     assert ws.max_row == 1 + 4 + 2
     rel = wb[SHEET_RELATIONS]
     arrows = [rel.cell(row=r, column=3).value for r in range(2, rel.max_row + 1)]
-    assert arrows.count("→") == 2 and arrows.count("↔") == 1
+    assert arrows.count("→") == 4 and "↔" not in arrows
 
 
 def test_map_sheet_when_image_given(tmp_path, model):

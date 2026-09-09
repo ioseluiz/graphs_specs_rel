@@ -33,6 +33,17 @@ class GraphScene(QGraphicsScene):
         self.setBackgroundBrush(QColor(palette.CANVAS_BACKGROUND))
         self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.BspTreeIndex)
         self.setSceneRect(QRectF(-2000, -2000, 4000, 4000))
+        self.selectionChanged.connect(self._sync_linked)
+
+    def _sync_linked(self) -> None:
+        """Marca como «vinculadas» las secciones en los extremos de las flechas seleccionadas."""
+        linked: set[int] = set()
+        for item in self.selectedItems():
+            if isinstance(item, RelationEdgeItem):
+                linked.add(item.source.section_id)
+                linked.add(item.target.section_id)
+        for sid, node in self.nodes.items():
+            node.set_linked(sid in linked)
 
     # ------------------------------------------------------------------ nodos
     def add_node(self, section_id: int, code: str, title: str, fill: str, border: str,

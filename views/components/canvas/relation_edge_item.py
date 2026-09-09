@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPe
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyleOptionGraphicsItem, QWidget
 
 from config import palette
-from models.entities import RelationKind, Side
+from models.entities import RelationKind, Side  # noqa: F401  (kind se conserva por compatibilidad)
 from views.components.canvas.orthogonal_router import (
     choose_ports,
     choose_ports_near,
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from views.components.canvas.section_node_item import SectionNodeItem
 
 ARROW_LEN, ARROW_HALF = 11.0, 4.5
+ENDPOINT_R = 4.0   # marcador del origen cuando la flecha está seleccionada
 
 
 class RelationEdgeItem(QGraphicsPathItem):
@@ -52,6 +53,7 @@ class RelationEdgeItem(QGraphicsPathItem):
         self._hover = False
         self._dimmed = False
         self._highlight = False
+        self.notes = ""
         self._handles: list[WaypointHandleItem] = []
         self._shape = QPainterPath()
         self._bounds = QRectF()
@@ -108,9 +110,7 @@ class RelationEdgeItem(QGraphicsPathItem):
         else:
             pts = route(src, tgt, ports)
         self.points = pts
-        arrow = "↔" if self.kind is RelationKind.MUTUAL else "→"
-        self.setToolTip(f"{self.source.code} {arrow} {self.target.code}\n"
-                        "Clic derecho: invertir dirección, cambiar tipo, ruta o eliminar · Tecla R: invertir")
+        self._update_tooltip()
         self.prepareGeometryChange()
         path = QPainterPath()
         if pts:
@@ -126,11 +126,20 @@ class RelationEdgeItem(QGraphicsPathItem):
         self._arrows = []
         if len(pts) >= 2:
             self._arrows.append(self._arrow_head(pts[-2], pts[-1]))
-            if self.kind is RelationKind.MUTUAL:
-                self._arrows.append(self._arrow_head(pts[1], pts[0]))
         for h in self._handles:
             if self.waypoints and h.index < len(self.waypoints) and not h._dragging:
                 h.setPos(self.waypoints[h.index])
+
+    def set_notes(self, notes: str | None) -> None:
+        self.notes = (notes or "").strip()
+        self._update_tooltip()
+
+    def _update_tooltip(self) -> None:
+        text = f"{self.source.code} → {self.target.code}"
+        if getattr(self, "notes", ""):
+            text += f"\n{self.notes}"
+        text += "\nClic: seleccionar (resalta las secciones vinculadas) · Tecla R: invertir · Clic derecho: más opciones"
+        self.setToolTip(text)
 
     @staticmethod
     def _arrow_head(from_pt: QPointF, tip: QPointF) -> QPolygonF:
@@ -256,12 +265,23 @@ class RelationEdgeItem(QGraphicsPathItem):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         color = QColor(palette.EDGE_COLOR)
         width = 1.6
+        selected = self.isSelected()
         if self._highlight:
             color, width = QColor(palette.HIGHLIGHT_BORDER), 2.6
-        elif self.isSelected():
-            color, width = QColor(palette.EDGE_SELECTED), 2.6
+        elif selected:
+            color, width = QColor(palette.EDGE_SELECTED), 3.0
         elif self._hover:
             color, width = QColor(palette.EDGE_HOVER), 2.2
+        if selected:
+            # Halo translúcido bajo la flecha: la selección se distingue de las demás líneas a simple vista.
+            halo = QPen(QColor(palette.EDGE_SELECTED_HALO), width + 7)
+            halo.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            halo.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(halo)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(self.path())
+            for arrow in self._arrows:
+                painter.drawPolygon(arrow)
         pen = QPen(color, width)
         pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         pen.setCapStyle(Qt.PenCapStyle.FlatCap)
@@ -272,3 +292,8 @@ class RelationEdgeItem(QGraphicsPathItem):
         painter.setBrush(color)
         for arrow in self._arrows:
             painter.drawPolygon(arrow)
+        if selected and self.points:
+            # Marcador del punto de salida (círculo claro): la punta de flecha ya marca la entrada.
+            painter.setPen(QPen(color, 1.6))
+            painter.setBrush(QColor(palette.SURFACE))
+            painter.drawEllipse(self.points[0], ENDPOINT_R, ENDPOINT_R)

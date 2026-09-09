@@ -12,7 +12,6 @@ import numpy as np
 from PyQt6.QtCore import QObject
 
 from config import palette
-from models.entities import RelationKind
 from models.layout_engine import layout3d, place_new_node_3d
 from models.project_model import ProjectModel
 from utils.debounce import Debouncer
@@ -160,14 +159,15 @@ class View3DController(QObject):
             fills.append(self.project.section_colors(s)[1] if s else palette.BORDER_STRONG)
             labels.append(s.code if s else str(sid))
         edges: list[tuple[int, int]] = []
-        mutual: list[bool] = []
+        directed = {(r.source_id, r.target_id) for r in self.project.relations()}
+        paired: list[bool] = []   # True si también existe la flecha inversa (se dibujan separadas)
         for rel in self.project.relations():
             if rel.source_id in index and rel.target_id in index:
                 edges.append((index[rel.source_id], index[rel.target_id]))
-                mutual.append(rel.kind is RelationKind.MUTUAL)
+                paired.append((rel.target_id, rel.source_id) in directed)
         degrees = [self.project.graph.G.degree(sid) if sid in self.project.graph.G else 0 for sid in ids]
         self.widget.set_graph(
             ids, pos, fills,
-            np.array(edges, dtype=np.int32).reshape(-1, 2), np.array(mutual, dtype=bool),
+            np.array(edges, dtype=np.int32).reshape(-1, 2), np.array(paired, dtype=bool),
             labels, degrees,
         )

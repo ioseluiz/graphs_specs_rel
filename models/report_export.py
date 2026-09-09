@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from config import palette
-from models.entities import RelationKind
 from models.relation_normalizer import denormalize
 
 if TYPE_CHECKING:
@@ -269,7 +268,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
                                                              if model.section(denormalize(x)[0]) else "")), start=1):
         a_id, _kind, b_id = denormalize(rel)
         sa, sb = model.section(a_id), model.section(b_id)
-        arrow = "↔" if rel.kind is RelationKind.MUTUAL else "→"
+        arrow = "→"
         ca, cb = category_of(sa) if sa else None, category_of(sb) if sb else None
         values = [i, sa.label if sa else "?", arrow, sb.label if sb else "?", ca.name if ca else "", cb.name if cb else ""]
         for col, value in enumerate(values, start=1):

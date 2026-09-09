@@ -36,6 +36,7 @@ class SectionNodeItem(QGraphicsItem):
         self._hover = False
         self._dimmed = False
         self._highlight = False
+        self._linked = False      # extremo de una flecha seleccionada
         self._title_lines: list[str] = []
         self._pos_at_press: QPointF | None = None
         self._code_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
@@ -191,6 +192,16 @@ class SectionNodeItem(QGraphicsItem):
             self._highlight = on
             self.update()
 
+    def set_linked(self, on: bool) -> None:
+        """Resalta la sección por ser origen o destino de la flecha seleccionada."""
+        if self._linked != on:
+            self._linked = on
+            self.update()
+
+    @property
+    def linked(self) -> bool:
+        return self._linked
+
     # ------------------------------------------------------------------ eventos
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):  # type: ignore[override]
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
@@ -229,12 +240,17 @@ class SectionNodeItem(QGraphicsItem):
             painter.setBrush(QColor(0, 0, 0, 28))
             painter.drawPath(shadow)
         pen = QPen(self.border, 1.5)
+        fill = QBrush(self.fill)
         if self._highlight:
             pen = QPen(QColor(palette.HIGHLIGHT_BORDER), 2.8)
         elif self.isSelected():
             pen = QPen(QColor(palette.NODE_SELECTED_BORDER), 2.5)
+        elif self._linked:
+            # Extremo de la flecha seleccionada: borde marcado y relleno un poco más oscuro.
+            pen = QPen(QColor(palette.NODE_LINKED_BORDER), 2.5)
+            fill = QBrush(self.fill.darker(palette.NODE_LINKED_DARKEN))
         painter.setPen(pen)
-        painter.setBrush(QBrush(self.fill))
+        painter.setBrush(fill)
         painter.drawPath(path)
 
         painter.setPen(QColor(palette.NODE_TEXT))

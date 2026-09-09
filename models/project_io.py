@@ -1,9 +1,11 @@
 """Plantillas e intercambio de tablas del proyecto (secciones y relaciones) en Excel/CSV.
 
 Formato de la plantilla:
-- Hoja/archivo "Secciones":  Número | Descripción | Categoría | Color
-- Hoja/archivo "Relaciones": Sección A | Relación | Sección B
+- Hoja/archivo "Proyecto"   (opcional): Código | <valor>  y  Nombre | <valor>
+- Hoja/archivo "Secciones":  Número | Descripción | Categoría | Color | Estatus | Avance | Responsables | Observaciones
+- Hoja/archivo "Relaciones": Sección A | Relación | Sección B | Observaciones
 Las secciones pueden escribirse como "03 30 00" o "03 30 00 - Concreto".
+Cada dirección es una relación (flecha) independiente: si A referencia a B y B referencia a A, son dos filas.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable
 
-from models.entities import RelationKind, UiKind
+from models.entities import UiKind
 from models.relation_normalizer import (
     DuplicateRelationError,
     SelfRelationError,
@@ -27,12 +29,18 @@ if TYPE_CHECKING:
     from models.project_model import ProjectModel
 
 SECTION_HEADERS = ["Número", "Descripción", "Categoría", "Color", "Estatus", "Avance", "Responsables", "Observaciones"]
-RELATION_HEADERS = ["Sección A", "Relación", "Sección B"]
+RELATION_HEADERS = ["Sección A", "Relación", "Sección B", "Observaciones"]
+PROJECT_FIELDS = [("Código", "code"), ("Nombre", "name")]
 RESPONSIBLE_COLORS = ("#5B9BD5", "#70AD47", "#7030A0", "#BF9000", "#ED7D31", "#C00000", "#00B0F0", "#7F7F7F")
+SHEET_PROJECT = "Proyecto"
 SHEET_SECTIONS = "Secciones"
 SHEET_RELATIONS = "Relaciones"
 SHEET_HELP = "Instrucciones"
 
+# Texto histórico de la plantilla 0.2.x ("Referencia mutua ↔"): hoy equivale a DOS filas, una por dirección.
+KIND_BOTH = "both"
+
+EXAMPLE_PROJECT = [("Código", "CC-26-01"), ("Nombre", "Proyecto de ejemplo")]
 EXAMPLE_SECTIONS = [
     ("03 30 00", "Concreto", "Técnica / constructiva", "", "En elaboración", 70, "INIO, INIC", "Pendiente revisión de mezcla"),
     ("31 23 00", "Excavación", "Técnica / constructiva", "", "Aprobada", 100, "INIG", ""),
@@ -40,12 +48,20 @@ EXAMPLE_SECTIONS = [
     ("01 35 29", "Requisitos de seguridad", "Auxiliar / apoyo", "#DDEBF7", "En revisión", 40, "INIO", ""),
 ]
 EXAMPLE_RELATIONS = [
-    ("31 23 00 - Excavación", UiKind.REFERENCES.value, "03 30 00 - Concreto"),
-    ("01 31 19", UiKind.REFERENCED_BY.value, "31 23 00"),
-    ("01 35 29", UiKind.MUTUAL.value, "03 30 00"),
+    ("31 23 00 - Excavación", UiKind.REFERENCES.value, "03 30 00 - Concreto", ""),
+    ("01 31 19", UiKind.REFERENCED_BY.value, "31 23 00", "Ver artículo 3.2"),
+    ("01 35 29", UiKind.REFERENCES.value, "03 30 00", ""),
+    ("03 30 00", UiKind.REFERENCES.value, "01 35 29", "Sentido contrario: son dos flechas"),
 ]
 HELP_LINES = [
-    "Plantilla de SpecRel para cargar un proyecto desde Excel.",
+    "Plantilla de SpecRel para crear un mapa de referencias desde Excel.",
+    "",
+    "Cómo usarla: complete las hojas y luego ARRASTRE este archivo sobre la ventana de SpecRel",
+    "(o use Archivo → Tablas → Importar / crear mapa desde Excel o CSV…).",
+    "Si no hay ningún proyecto abierto, SpecRel crea el archivo del proyecto (.specrel) junto a este Excel",
+    "y muestra el mapa. Si ya hay un proyecto abierto, puede agregar las filas a ese proyecto o crear uno nuevo.",
+    "",
+    "Hoja 'Proyecto' (opcional): Código y Nombre del proyecto nuevo. Si falta, se usa el nombre del archivo.",
     "",
     "Hoja 'Secciones': una fila por sección.",
     "  Número      -> obligatorio (ej. 03 30 00 o 4.28.33).",
@@ -57,13 +73,15 @@ HELP_LINES = [
     "  Responsables-> códigos separados por coma (INIO, INIG, …); los desconocidos se crean.",
     "  Observaciones -> texto libre.",
     "",
-    "Hoja 'Relaciones': una fila por relación.",
+    "Hoja 'Relaciones': una fila por relación (flecha).",
     "  Sección A / Sección B -> número, o 'número - descripción'. Las secciones inexistentes se crean.",
-    "  Relación -> 'Hace referencia a →', '← Es referenciada por' o 'Referencia mutua ↔'.",
-    "              También se aceptan '->', '<-', '<->', 'A->B', 'mutua'.",
+    "  Relación -> 'Hace referencia a →' (A → B) o '← Es referenciada por' (B → A).",
+    "              También se aceptan '->', '<-', 'A->B'.",
+    "  Observaciones -> texto libre; se muestra al pasar el mouse sobre la flecha.",
+    "  Cada dirección es una flecha independiente: si A referencia a B y B referencia a A,",
+    "  escriba dos filas (A → B y B → A). Las filas repetidas se omiten y se informan al final.",
     "",
-    "Importe desde SpecRel: Archivo → Importar tablas (CSV/Excel)…",
-    "También puede usar dos CSV separados con los mismos encabezados.",
+    "También puede usar archivos CSV separados (secciones.csv, relaciones.csv y proyecto.csv) con los mismos encabezados.",
 ]
 
 
@@ -81,8 +99,9 @@ class ImportSummary:
     relations_created: int = 0
     relations_duplicated: int = 0
     errors: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)   # filas de relaciones omitidas, con el motivo
 
-    def text(self) -> str:
+    def text(self, max_lines: int = 15) -> str:
         lines = [
             f"Secciones creadas: {self.sections_created}",
             f"Secciones actualizadas: {self.sections_updated}",
@@ -92,13 +111,18 @@ class ImportSummary:
             f"Relaciones creadas: {self.relations_created}",
             f"Relaciones ya existentes u omitidas: {self.relations_duplicated}",
         ]
-        if self.errors:
-            lines.append("")
-            lines.append(f"Filas con problemas ({len(self.errors)}):")
-            lines.extend(f"  • {e}" for e in self.errors[:15])
-            if len(self.errors) > 15:
-                lines.append(f"  … y {len(self.errors) - 15} más")
+        for title, items in (("Filas omitidas", self.skipped), ("Filas con problemas", self.errors)):
+            if items:
+                lines.append("")
+                lines.append(f"{title} ({len(items)}):")
+                lines.extend(f"  • {e}" for e in items[:max_lines])
+                if len(items) > max_lines:
+                    lines.append(f"  … y {len(items) - max_lines} más")
         return "\n".join(lines)
+
+    def full_text(self) -> str:
+        """Detalle completo (para copiar al portapapeles)."""
+        return self.text(max_lines=10_000)
 
 
 # ============================================================================ plantilla
@@ -115,6 +139,7 @@ def write_template_xlsx(path: Path, with_examples: bool = True) -> None:
     ws_sec = wb.active
     ws_sec.title = SHEET_SECTIONS
     ws_rel = wb.create_sheet(SHEET_RELATIONS)
+    ws_proj = wb.create_sheet(SHEET_PROJECT)
     ws_help = wb.create_sheet(SHEET_HELP)
 
     header_font = Font(bold=True, color="FFFFFF")
@@ -130,12 +155,20 @@ def write_template_xlsx(path: Path, with_examples: bool = True) -> None:
         ws.freeze_panes = "A2"
 
     write_headers(ws_sec, SECTION_HEADERS, [16, 40, 26, 10, 18, 10, 22, 40])
-    write_headers(ws_rel, RELATION_HEADERS, [40, 28, 40])
+    write_headers(ws_rel, RELATION_HEADERS, [40, 28, 40, 40])
+    for i, (label, _key) in enumerate(PROJECT_FIELDS, start=1):
+        cell = ws_proj.cell(row=i, column=1, value=label)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="E3ECF5")
+    ws_proj.column_dimensions["A"].width = 14
+    ws_proj.column_dimensions["B"].width = 50
     if with_examples:
         for row in EXAMPLE_SECTIONS:
             ws_sec.append(list(row))
         for row in EXAMPLE_RELATIONS:
             ws_rel.append(list(row))
+        for i, (_label, value) in enumerate(EXAMPLE_PROJECT, start=1):
+            ws_proj.cell(row=i, column=2, value=value)
 
     kinds = ",".join(k.value for k in UiKind)
     dv = DataValidation(type="list", formula1=f'"{kinds}"', allow_blank=True, showDropDown=False)
@@ -161,6 +194,7 @@ def write_template_csv(folder: Path) -> tuple[Path, Path]:
     folder.mkdir(parents=True, exist_ok=True)
     sec_path = folder / "secciones.csv"
     rel_path = folder / "relaciones.csv"
+    proj_path = folder / "proyecto.csv"
     try:
         with open(sec_path, "w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.writer(fh, delimiter=";")
@@ -170,6 +204,9 @@ def write_template_csv(folder: Path) -> tuple[Path, Path]:
             writer = csv.writer(fh, delimiter=";")
             writer.writerow(RELATION_HEADERS)
             writer.writerows(EXAMPLE_RELATIONS)
+        with open(proj_path, "w", encoding="utf-8-sig", newline="") as fh:
+            writer = csv.writer(fh, delimiter=";")
+            writer.writerows(EXAMPLE_PROJECT)
     except OSError as exc:
         raise ProjectIOError(f"No se pudo guardar la plantilla CSV: {exc}") from exc
     return sec_path, rel_path
@@ -180,6 +217,11 @@ def write_template_csv(folder: Path) -> tuple[Path, Path]:
 class Tables:
     sections: list[dict[str, str]] = field(default_factory=list)
     relations: list[dict[str, str]] = field(default_factory=list)
+    project: dict[str, str] = field(default_factory=dict)   # "code" / "name" de la hoja Proyecto
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.sections and not self.relations
 
 
 def _norm_header(h: str) -> str:
@@ -200,6 +242,11 @@ _RELATION_KEYS = {
     "a": ("seccion a", "a", "origen", "source", "from", "section a"),
     "kind": ("relacion", "tipo de relacion", "tipo", "relation", "kind", "conexion"),
     "b": ("seccion b", "b", "destino", "target", "to", "section b"),
+    "notes": ("observaciones", "observacion", "notas", "notes", "comentarios", "observations", "comentario"),
+}
+_PROJECT_KEYS = {
+    "code": ("codigo", "código", "code", "codigo del proyecto"),
+    "name": ("nombre", "name", "proyecto", "nombre del proyecto"),
 }
 
 
@@ -236,6 +283,24 @@ def _rows_to_dicts(headers: list[str], rows: Iterable[list], spec: dict[str, tup
     return out
 
 
+def _project_from_rows(rows: Iterable[list]) -> dict[str, str]:
+    """Hoja/CSV 'Proyecto': pares clave | valor (Código, Nombre)."""
+    out: dict[str, str] = {}
+    for row in rows:
+        values = ["" if v is None else str(v).strip() for v in row]
+        if len(values) < 2 or not values[0]:
+            continue
+        key = _norm_header(values[0])
+        for field_name, candidates in _PROJECT_KEYS.items():
+            if key in candidates and values[1]:
+                out[field_name] = values[1]
+    return out
+
+
+def _is_project_title(title: str) -> bool:
+    return _norm_header(title).startswith("proyecto") or _norm_header(title) == "project"
+
+
 def _read_xlsx_tables(path: Path) -> Tables:
     try:
         from openpyxl import load_workbook
@@ -251,9 +316,12 @@ def _read_xlsx_tables(path: Path) -> Tables:
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
+            title = _norm_header(ws.title)
+            if _is_project_title(ws.title):
+                tables.project.update(_project_from_rows(rows))
+                continue
             headers = ["" if h is None else str(h) for h in rows[0]]
             kind = _classify(headers)
-            title = _norm_header(ws.title)
             if kind is None:
                 continue
             if kind == "relations" or "relac" in title:
@@ -262,7 +330,7 @@ def _read_xlsx_tables(path: Path) -> Tables:
                 tables.sections.extend(_rows_to_dicts(headers, rows[1:], _SECTION_KEYS))
     finally:
         wb.close()
-    if not tables.sections and not tables.relations:
+    if tables.is_empty:
         raise ProjectIOError("El archivo no contiene hojas con los encabezados esperados "
                              "(Número/Descripción o Sección A/Relación/Sección B).")
     return tables
@@ -289,6 +357,9 @@ def _read_csv_tables(paths: list[Path]) -> Tables:
     tables = Tables()
     for path in paths:
         headers, rows = _read_csv_rows(path)
+        if _is_project_title(path.stem):
+            tables.project.update(_project_from_rows([headers, *rows]))
+            continue
         kind = _classify(headers)
         if kind == "relations":
             tables.relations.extend(_rows_to_dicts(headers, rows, _RELATION_KEYS))
@@ -300,7 +371,7 @@ def _read_csv_tables(paths: list[Path]) -> Tables:
 
 
 def read_tables(paths: list[Path]) -> Tables:
-    """Lee uno o varios archivos (XLSX con hojas, o CSV de secciones y/o relaciones)."""
+    """Lee uno o varios archivos (XLSX con hojas, o CSV de secciones y/o relaciones y/o proyecto)."""
     if not paths:
         raise ProjectIOError("No se indicó ningún archivo.")
     xlsx = [p for p in paths if p.suffix.lower() in (".xlsx", ".xlsm")]
@@ -310,22 +381,27 @@ def read_tables(paths: list[Path]) -> Tables:
         t = _read_xlsx_tables(p)
         tables.sections.extend(t.sections)
         tables.relations.extend(t.relations)
+        tables.project.update(t.project)
     if csvs:
         t = _read_csv_tables(csvs)
         tables.sections.extend(t.sections)
         tables.relations.extend(t.relations)
+        tables.project.update(t.project)
     others = [p for p in paths if p not in xlsx and p not in csvs]
     if others:
         raise ProjectIOError(f"Formato no soportado: {others[0].suffix}")
+    if tables.is_empty and csvs and not xlsx:
+        raise ProjectIOError("Los CSV no contienen secciones ni relaciones (solo datos del proyecto).")
     return tables
 
 
 # ============================================================================ interpretación
-def parse_kind(text: str) -> UiKind:
+def parse_kind(text: str) -> UiKind | str:
+    """Tipo de relación de una celda. Devuelve `KIND_BOTH` para los textos antiguos de «mutua» (= dos filas)."""
     t = search_key(text or "")
     compact = t.replace(" ", "")
     if "mutua" in t or "↔" in text or "<->" in compact or "<>" in compact or "ambas" in t:
-        return UiKind.MUTUAL
+        return KIND_BOTH
     if "referenciada" in t or "←" in text or "<-" in compact or "b->a" in compact or t.startswith("es "):
         return UiKind.REFERENCED_BY
     return UiKind.REFERENCES
@@ -474,6 +550,29 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
                 if not changed:
                     summary.sections_updated += 1
 
+    # Para explicar cada fila omitida: (origen, destino) -> fila del archivo que creó esa flecha.
+    seen_rows: dict[tuple[int, int], int] = {}
+
+    def describe(source_id: int, target_id: int) -> str:
+        sa, sb = model.section(source_id), model.section(target_id)
+        return f"{sa.code if sa else '?'} → {sb.code if sb else '?'}"
+
+    def add_directed(row_no: int, a_id: int, kind: UiKind, b_id: int, notes: str | None) -> None:
+        source_id, target_id = (a_id, b_id) if kind is UiKind.REFERENCES else (b_id, a_id)
+        try:
+            model.add_relation(a_id, kind, b_id, notes)
+            summary.relations_created += 1
+            seen_rows[(source_id, target_id)] = row_no
+        except DuplicateRelationError as exc:
+            summary.relations_duplicated += 1
+            first = seen_rows.get((source_id, target_id))
+            where = f"repite la fila {first}" if first else "ya existía en el proyecto"
+            summary.skipped.append(f"Relaciones fila {row_no}: {describe(source_id, target_id)} omitida ({where}).")
+            if notes and not (exc.existing.notes or "").strip():
+                model.set_relation_notes(exc.existing.id, notes)
+        except SelfRelationError:
+            summary.errors.append(f"Relaciones fila {row_no}: una sección no puede relacionarse consigo misma.")
+
     for i, row in enumerate(tables.relations, start=2):
         tick()
         a_text, b_text = row.get("a", ""), row.get("b", "")
@@ -487,19 +586,14 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
             summary.errors.append(f"Relaciones fila {i}: {exc}")
             continue
         summary.sections_created += int(created_a) + int(created_b)
+        notes = row.get("notes", "").strip() or None
         kind = parse_kind(row.get("kind", ""))
-        try:
-            model.add_relation(a.id, kind, b.id)
-            summary.relations_created += 1
-        except DuplicateRelationError as exc:
-            # Si la fila pide mutua y ya existe una dirección, ampliar a mutua.
-            if kind is UiKind.MUTUAL and exc.existing.kind is not RelationKind.MUTUAL:
-                model.make_mutual(exc.existing.id)
-                summary.relations_created += 1
-            else:
-                summary.relations_duplicated += 1
-        except SelfRelationError:
-            summary.errors.append(f"Relaciones fila {i}: una sección no puede relacionarse consigo misma.")
+        if kind == KIND_BOTH:
+            # Texto antiguo «Referencia mutua»: hoy son dos flechas independientes.
+            add_directed(i, a.id, UiKind.REFERENCES, b.id, notes)
+            add_directed(i, b.id, UiKind.REFERENCES, a.id, notes)
+        else:
+            add_directed(i, a.id, kind, b.id, notes)
     return summary
 
 
@@ -512,7 +606,10 @@ def export_tables_xlsx(model: "ProjectModel", path: Path) -> None:
         raise ProjectIOError("openpyxl no está instalado.") from exc
     write_template_xlsx(path, with_examples=False)
     wb = load_workbook(path)
-    ws_sec, ws_rel = wb[SHEET_SECTIONS], wb[SHEET_RELATIONS]
+    ws_sec, ws_rel, ws_proj = wb[SHEET_SECTIONS], wb[SHEET_RELATIONS], wb[SHEET_PROJECT]
+    meta = model.meta()
+    ws_proj.cell(row=1, column=2, value=meta.code)
+    ws_proj.cell(row=2, column=2, value=meta.name)
     for s in model.sections():
         cat = model.category(s.category_id)
         st = model.status(s.status_id)
@@ -524,7 +621,7 @@ def export_tables_xlsx(model: "ProjectModel", path: Path) -> None:
         sa, sb = model.section(a_id), model.section(b_id)
         if sa is None or sb is None:
             continue
-        ws_rel.append([sa.label, kind.value, sb.label])
+        ws_rel.append([sa.label, kind.value, sb.label, rel.notes or ""])
     try:
         wb.save(path)
     except OSError as exc:

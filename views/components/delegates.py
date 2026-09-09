@@ -78,24 +78,22 @@ class TwoLineSectionDelegate(QStyledItemDelegate):
 
 
 class RelationKindDelegate(QStyledItemDelegate):
-    """Celda «Relación»: muestra 'A → B' / 'A ↔ B' y edita con un combo desplegado de inmediato.
+    """Celda «Relación»: muestra 'A → B' y edita con un combo desplegado de inmediato.
 
-    Opciones: «Hace referencia a →», «Referencia mutua ↔» e «Invertir dirección (B → A)». La opción
-    «← Es referenciada por» no se ofrece aquí: la fila siempre muestra origen → destino, así que en una
-    relación existente invertir es la acción clara.
+    Opciones: «Hace referencia a →» e «Invertir dirección (B → A)». La opción «← Es referenciada por»
+    no se ofrece aquí: la fila siempre muestra origen → destino, así que en una relación existente
+    invertir es la acción clara. Si se quiere la referencia en ambos sentidos, se agrega otra fila.
     """
 
     _FONT = QFont("Segoe UI", 9)
     _SMALL = QFont("Segoe UI", 7)
 
     def createEditor(self, parent: QWidget, option: QStyleOptionViewItem, index: QModelIndex) -> QWidget:  # noqa: N802
-        from models.relations_table_model import INVERT_OPTION, ROLE_IS_MUTUAL
+        from models.relations_table_model import INVERT_OPTION
 
         combo = QComboBox(parent)
         combo.addItem(UiKind.REFERENCES.value)
-        combo.addItem(UiKind.MUTUAL.value)
-        if not index.data(ROLE_IS_MUTUAL):
-            combo.addItem(INVERT_OPTION)
+        combo.addItem(INVERT_OPTION)
         combo.setToolTip("La fila muestra siempre origen → destino. «Invertir» intercambia A y B.")
         return combo
 
@@ -110,7 +108,7 @@ class RelationKindDelegate(QStyledItemDelegate):
             model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
-        from models.relations_table_model import ROLE_CODE_A, ROLE_CODE_B, ROLE_IS_MUTUAL
+        from models.relations_table_model import ROLE_CODE_A, ROLE_CODE_B
 
         painter.save()
         bg = index.data(Qt.ItemDataRole.BackgroundRole)
@@ -124,8 +122,7 @@ class RelationKindDelegate(QStyledItemDelegate):
         fm = QFontMetrics(self._FONT)
         fm_small = QFontMetrics(self._SMALL)
         label = str(index.data() or "")
-        arrow = "↔" if index.data(ROLE_IS_MUTUAL) else "→"
-        detail = f"{index.data(ROLE_CODE_A) or ''} {arrow} {index.data(ROLE_CODE_B) or ''}".strip()
+        detail = f"{index.data(ROLE_CODE_A) or ''} → {index.data(ROLE_CODE_B) or ''}".strip()
         total_h = fm.height() + fm_small.height()
         top = r.top() + (r.height() - total_h) // 2
         painter.drawText(QRect(r.left(), top, r.width(), fm.height()),
@@ -378,8 +375,6 @@ class ActionsDelegate(QStyledItemDelegate):
     TIPS = ("Editar Sección A / Sección B", "Invertir dirección (B → A)", "Eliminar relación")
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
-        from models.relations_table_model import ROLE_IS_MUTUAL
-
         painter.save()
         bg = index.data(Qt.ItemDataRole.BackgroundRole)
         if option.state & QStyle.StateFlag.State_Selected:
@@ -391,8 +386,7 @@ class ActionsDelegate(QStyledItemDelegate):
         painter.setFont(QFont("Segoe UI Symbol", 11))
         painter.setPen(QColor(palette.PRIMARY))
         painter.drawText(edit_rect, int(Qt.AlignmentFlag.AlignCenter), "✎")
-        mutual = bool(index.data(ROLE_IS_MUTUAL))
-        painter.setPen(QColor(palette.TEXT_DISABLED if mutual else palette.PRIMARY))
+        painter.setPen(QColor(palette.PRIMARY))
         painter.setFont(QFont("Segoe UI Symbol", 12, QFont.Weight.Bold))
         painter.drawText(inv_rect, int(Qt.AlignmentFlag.AlignCenter), "⇄")
         painter.setFont(QFont("Segoe UI Symbol", 11))
@@ -408,8 +402,6 @@ class ActionsDelegate(QStyledItemDelegate):
                 QRect(left + 2 * self.ICON_W, rect.top(), self.ICON_W, rect.height()))
 
     def editorEvent(self, event: QEvent, model, option: QStyleOptionViewItem, index: QModelIndex) -> bool:  # noqa: N802
-        from models.relations_table_model import ROLE_IS_MUTUAL
-
         if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
             rid = index.data(ROLE_RELATION_ID)
             edit_rect, inv_rect, del_rect = self._rects(option.rect)
@@ -418,8 +410,7 @@ class ActionsDelegate(QStyledItemDelegate):
                 self.editRequested.emit(int(rid))
                 return True
             if inv_rect.contains(pos):
-                if not index.data(ROLE_IS_MUTUAL):
-                    self.invertRequested.emit(int(rid))
+                self.invertRequested.emit(int(rid))
                 return True
             if del_rect.contains(pos):
                 self.deleteRequested.emit(int(rid))
@@ -429,14 +420,9 @@ class ActionsDelegate(QStyledItemDelegate):
     def helpEvent(self, event, view, option: QStyleOptionViewItem, index: QModelIndex) -> bool:  # noqa: N802
         from PyQt6.QtWidgets import QToolTip
 
-        from models.relations_table_model import ROLE_IS_MUTUAL
-
         if event.type() == QEvent.Type.ToolTip:
             pos = event.pos()
-            tips = list(self.TIPS)
-            if index.data(ROLE_IS_MUTUAL):
-                tips[1] = "Invertir no aplica a una referencia mutua"
-            for rect, tip in zip(self._rects(option.rect), tips):
+            for rect, tip in zip(self._rects(option.rect), self.TIPS):
                 if rect.contains(pos):
                     QToolTip.showText(event.globalPos(), tip, view)
                     return True

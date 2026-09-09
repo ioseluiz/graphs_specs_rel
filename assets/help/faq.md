@@ -24,13 +24,27 @@ use **Sección personalizada…**.
 La fila siempre muestra *origen → destino*. Al invertir, A y B se intercambian y la celda vuelve a decir
 «Hace referencia a →»: el cambio se aplicó, y la barra de estado muestra el antes y el después. Lo más directo
 es el icono **⇄** de la fila, la opción *Invertir dirección* de la celda Relación, o en el mapa la tecla **R**
-con la flecha seleccionada (o clic derecho sobre ella). Para pasar a mutua o volver a dirigida use la celda
-Relación o el clic derecho en la flecha. Vea *Relaciones*.
+con la flecha seleccionada (o clic derecho sobre ella). Vea *Relaciones*.
 
-## Registré «A → B» y la app me preguntó si quería una relación mutua
+## A hace referencia a B y B hace referencia a A: ¿cómo lo registro?
 
-Ya existía «B → A». Solo puede haber una relación entre dos secciones; la app propone unirlas en una
-referencia mutua ↔ en lugar de duplicarlas.
+Registre las dos relaciones (A → B y B → A). Cada dirección es una flecha independiente con su propio inicio y
+su punta; el clic derecho sobre una flecha ofrece *Agregar flecha inversa*. Solo se rechaza repetir exactamente
+la misma dirección. Los proyectos de versiones anteriores que tenían «referencias mutuas» se convierten en dos
+flechas al abrirlos.
+
+## Importé un Excel y una fila no apareció en el mapa
+
+Al final de la importación se listan las **filas omitidas** con el motivo (por ejemplo «repite la fila 18») y el
+botón *Copiar detalle* copia la lista completa. Una fila se omite solo cuando la misma flecha, en la misma
+dirección, ya existe. Si su Excel tiene A → B en una fila y B → A en otra, ambas se cargan como dos flechas.
+
+## ¿Puedo abrir el mapa directamente desde el Excel, sin crear antes un proyecto?
+
+Sí. Arrastre el archivo `.xlsx` o `.csv` de la plantilla sobre la ventana (o use *Crear mapa desde Excel/CSV…*
+en la pantalla de inicio). SpecRel crea el archivo del proyecto (`.specrel`) junto al Excel, con el mismo
+nombre, carga las tablas y acomoda las secciones automáticamente. Si ya hay un proyecto abierto, pregunta si
+agregar las filas a ese proyecto o crear uno nuevo.
 
 ## Las flechas se cruzan o pasan sobre otros nodos
 

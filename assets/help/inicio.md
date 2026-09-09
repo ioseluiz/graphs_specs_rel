@@ -17,11 +17,14 @@ de cada una, cuánto avance lleva y qué impacto tendría cambiarla.
 ## Un proyecto en cinco pasos
 
 1. **Archivo → Nuevo proyecto…** Elija dónde guardar el archivo `.specrel` e indique código y nombre.
-   Cada proyecto es un único archivo; no hay base de datos central.
+   Cada proyecto es un único archivo; no hay base de datos central. **Atajo:** si ya tiene las secciones y
+   relaciones en la plantilla de Excel, arrastre el archivo sobre la ventana (o pulse *Crear mapa desde
+   Excel/CSV…*): el proyecto se crea junto al Excel y el mapa aparece acomodado. Vea *Exportar e importar*.
 2. En **Sección A** escriba parte del número o del título, por ejemplo `31 23` o `excav`, y elija de la
    lista. Repita en **Sección B**.
-3. Elija el **tipo de relación** (→, ←, ↔) y presione **Enter** o **Agregar**. Las secciones que no existían
-   en el proyecto se crean solas con la clasificación y el color del catálogo.
+3. Elija el **tipo de relación** (→ o ←) y presione **Enter** o **Agregar**. Las secciones que no existían
+   en el proyecto se crean solas con la clasificación y el color del catálogo. Si dos secciones se referencian
+   entre sí, registre ambas direcciones: serán dos flechas.
 4. En el **Mapa** acomode las secciones arrastrándolas. Las flechas siguen a los nodos. También puede crear
    relaciones directamente en el mapa con **Conectar**.
 5. Registre **estatus, avance y responsables** de cada sección (doble clic en el nodo o pestaña *Secciones*)
