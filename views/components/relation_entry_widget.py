@@ -75,7 +75,7 @@ class RelationEntryWidget(QWidget):
         self.custom_button = QPushButton("Sección personalizada…")
         self.custom_button.setProperty("role", "secondary")
         self.custom_button.setToolTip("Crear una sección con un número que no está en el catálogo MasterFormat "
-                                      "(por ejemplo 4.28.33)")
+                                      "(las cláusulas 4.28.x sí están: elíjalas de la lista)")
         row.addWidget(self.hint, 1)
         row.addWidget(self.custom_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(row)

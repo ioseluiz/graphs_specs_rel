@@ -39,17 +39,19 @@ class SectionEditorDialog(QDialog):
                  suggestion: tuple[str, str] | None = None,
                  statuses: list | None = None, responsibles: list | None = None,
                  status_id: int | None = None, progress: int = 0,
-                 responsible_ids: list[int] | None = None) -> None:
+                 responsible_ids: list[int] | None = None, kind: str = "section") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Nueva sección personalizada" if is_new else "Editar sección")
+        self.kind = kind
+        self.setWindowTitle("Nueva sección personalizada" if is_new
+                            else ("Editar cláusula" if kind == "clause" else "Editar sección"))
         self.setMinimumWidth(480)
         self._categories = {c.id: c for c in categories}
         self._statuses = list(statuses or [])
         self._responsibles = list(responsibles or [])
         layout = QVBoxLayout(self)
         if is_new:
-            intro = QLabel("Use este cuadro para secciones que no están en el catálogo MasterFormat "
-                           "(por ejemplo 4.28.33). Las secciones del catálogo se eligen desde la lista.")
+            intro = QLabel("Use este cuadro para códigos que no están en el catálogo MasterFormat ni en las "
+                           "cláusulas del pliego. Las secciones y cláusulas del catálogo se eligen desde la lista.")
             intro.setProperty("role", "hint")
             intro.setWordWrap(True)
             layout.addWidget(intro)
@@ -154,11 +156,22 @@ class SectionEditorDialog(QDialog):
         self.notes_edit.setMaximumHeight(80)
         form.addRow("Número:", self.code_edit)
         form.addRow("Descripción:", self.title_edit)
-        form.addRow("Categoría:", self.category_combo)
-        form.addRow("Color:", color_row)
-        form.addRow("Estatus:", self.status_combo)
-        form.addRow("Avance:", progress_row)
-        form.addRow("Responsables:", self.responsibles_list)
+        if kind == "clause":
+            # Una cláusula tiene categoría fija y no lleva estatus, avance ni responsables.
+            hint = QLabel("Las cláusulas del pliego solo se conectan y muestran su etiqueta; "
+                          "no tienen estatus, avance ni responsables.")
+            hint.setProperty("role", "hint")
+            hint.setWordWrap(True)
+            form.addRow("", hint)
+            form.addRow("Color:", color_row)
+            for w in (self.category_combo, self.status_combo, self.progress_spin, self.responsibles_list):
+                w.hide()
+        else:
+            form.addRow("Categoría:", self.category_combo)
+            form.addRow("Color:", color_row)
+            form.addRow("Estatus:", self.status_combo)
+            form.addRow("Avance:", progress_row)
+            form.addRow("Responsables:", self.responsibles_list)
         form.addRow("Observaciones:", self.notes_edit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -231,7 +244,9 @@ class SectionEditorDialog(QDialog):
         return self.fill_button.color.upper(), self.border_button.color.upper()
 
     def extras(self) -> tuple[int | None, int, list[int]]:
-        """(status_id, avance %, ids de responsables marcados)."""
+        """(status_id, avance %, ids de responsables marcados). Una cláusula devuelve (None, 0, [])."""
+        if self.kind == "clause":
+            return None, 0, []
         ids: list[int] = []
         if self.responsibles_list.isEnabled():
             for i in range(self.responsibles_list.count()):

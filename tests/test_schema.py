@@ -21,8 +21,10 @@ def test_schema_version_and_seed(db):
     assert db.schema_version() == SCHEMA_VERSION
     assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     cats = CategoryRepo(db).all()
-    assert len(cats) == 4
+    assert [c.name for c in cats] == ["Técnica / constructiva", "Contractual", "Auxiliar / apoyo", "Otra", "Cláusula"]
     assert CategoryRepo(db).default().name == "Otra"
+    by_name = {c.name: c for c in cats}
+    assert (by_name["Cláusula"].fill_color, by_name["Otra"].fill_color) == ("#F8CBF0", "#EDEDED")
 
 
 def test_unique_code_key(db):
@@ -83,7 +85,7 @@ def test_migration_v3_to_v4_splits_mutual_into_two_arrows(tmp_path):
     conn.close()
 
     db = ProjectDatabase.open(path)
-    assert db.schema_version() == SCHEMA_VERSION == 4
+    assert db.schema_version() == SCHEMA_VERSION == 5
     rels = sorted(RelationRepo(db).all(), key=lambda r: r.id)
     assert [(r.source_id, r.target_id, r.kind) for r in rels] == [(1, 2, RelationKind.REF), (2, 1, RelationKind.REF)]
     original, inverse = rels
@@ -136,7 +138,8 @@ def test_migration_from_v1_adds_section_colors(tmp_path):
     v1_sql = "\n".join(
         line for line in SCHEMA_SQL.splitlines()
         if not any(tag in line for tag in ("fill_color   TEXT CHECK", "border_color TEXT CHECK",
-                                            "status_id    INTEGER", "progress     INTEGER"))
+                                            "status_id    INTEGER", "progress     INTEGER",
+                                            "kind         TEXT NOT NULL"))
     )
     conn = sqlite3.connect(path)
     conn.executescript(v1_sql)
@@ -171,3 +174,42 @@ def test_create_open_and_backup(tmp_path):
     assert SectionRepo(db2).count() == 1
     db2.close()
     assert (tmp_path / "demo.specrel.bak1").exists()
+
+
+def test_migration_v4_to_v5_recalculates_keys_and_marks_clauses(tmp_path):
+    """Las numeraciones de cláusula conservan los puntos y las secciones 4.28.x pasan a ser cláusulas."""
+    from models.schema import SCHEMA_SQL
+
+    v4_sql = "\n".join(line for line in SCHEMA_SQL.splitlines() if "kind         TEXT NOT NULL" not in line)
+    path = tmp_path / "v4.specrel"
+    conn = sqlite3.connect(path)
+    conn.executescript(v4_sql)
+    conn.execute("PRAGMA user_version = 4")
+    conn.execute("INSERT INTO project (id, code, name, created_at, updated_at, app_version) "
+                 "VALUES (1, 'X', 'Y', 'now', 'now', '0.3.0')")
+    conn.execute("INSERT INTO categories (id, name, fill_color, border_color, sort_order, is_default) "
+                 "VALUES (1, 'Otra', '#F8CBF0', '#C55A9E', 0, 1)")
+    conn.execute("INSERT INTO statuses (id, name, color, sort_order, is_default) VALUES (1, 'En elaboración', '#FFE699', 0, 1)")
+    conn.execute("INSERT INTO responsibles (id, code, name, color, sort_order) VALUES (1, 'INIO', 'Costos', '#5B9BD5', 0)")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, category_id, status_id, progress, created_at, "
+                 "updated_at) VALUES (1, '4.28.3.1', '42831', 'Retención', 1, 1, 50, 'now', 'now')")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, category_id, status_id, progress, created_at, "
+                 "updated_at) VALUES (2, '31 23 00', '312300', 'Excavación', 1, 1, 30, 'now', 'now')")
+    conn.execute("INSERT INTO section_responsibles (section_id, responsible_id, sort_order) VALUES (1, 1, 0)")
+    conn.execute("INSERT INTO catalog (code_key, code, title, category_name) VALUES ('42833', '4.28.33', 'Sitio', NULL)")
+    conn.commit()
+    conn.close()
+
+    db = ProjectDatabase.open(path)
+    assert db.schema_version() == 5
+    secs = {s.code: s for s in SectionRepo(db).all()}
+    clause, plain = secs["4.28.3.1"], secs["31 23 00"]
+    assert clause.code_key == "4.28.3.1" and clause.kind == "clause"
+    assert clause.status_id is None and clause.progress == 0
+    assert db.conn.execute("SELECT COUNT(*) FROM section_responsibles WHERE section_id = 1").fetchone()[0] == 0
+    cats = {c.name: c for c in CategoryRepo(db).all()}
+    assert clause.category_id == cats["Cláusula"].id and cats["Cláusula"].fill_color == "#F8CBF0"
+    assert (cats["Otra"].fill_color, cats["Otra"].border_color) == ("#EDEDED", "#8C8C8C")
+    assert plain.kind == "section" and plain.status_id == 1 and plain.progress == 30 and plain.code_key == "312300"
+    assert db.conn.execute("SELECT code_key FROM catalog").fetchone()[0] == "4.28.33"
+    db.close()

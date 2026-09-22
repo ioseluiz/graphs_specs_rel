@@ -13,7 +13,14 @@ import unicodedata
 from models.entities import Relation, RelationKind, UiKind
 
 _NON_ALNUM = re.compile(r"[^0-9A-Za-z]")
-_CODE_PREFIX = re.compile(r"^\s*(\d+(?:[\s.\-]+\d+)*(?:[A-Za-z](?=\s|$))?)\s*(.*)$")
+# Numeración de cláusulas del pliego: dígitos separados por puntos, 3 o más segmentos ('4.28.3', '4.28.3.1').
+_DOTTED_CODE = re.compile(r"^\d+(?:\.\d+){2,}$")
+# MasterFormat escrito con puntos ('31.23.00', '01.35.13.13'): se compacta como siempre.
+_MF_DOTTED = re.compile(r"^\d{2}\.\d{2}\.\d{2}(?:\.\d{2})?$")
+# El prefijo numérico de un texto libre: primero una numeración con puntos completa (no absorbe el número
+# siguiente: '4.28.3.1 2 REQUISITOS' -> '4.28.3.1'), si no la forma MasterFormat con espacios/guiones.
+_CODE_PREFIX = re.compile(
+    r"^\s*(\d+(?:\.\d+){2,}(?=\s|$)|\d+(?:[\s.\-]+\d+)*(?:[A-Za-z](?=\s|$))?)\s*(.*)$")
 
 
 class SelfRelationError(ValueError):
@@ -29,9 +36,28 @@ class DuplicateRelationError(ValueError):
         self.attempted = attempted
 
 
+def is_dotted_code(code: str) -> bool:
+    """True para numeraciones de cláusula ('4.28.3.1'); False para MasterFormat, incluso con puntos."""
+    text = (code or "").strip()
+    return bool(_DOTTED_CODE.fullmatch(text)) and not _MF_DOTTED.fullmatch(text)
+
+
 def code_key(code: str) -> str:
-    """'31 23 00' == '312300' == '31-23-00' == '31.23.00'."""
+    """'31 23 00' == '312300' == '31-23-00' == '31.23.00'.
+
+    Las numeraciones de cláusula conservan los puntos: '4.28.3.1' y '4.28.31' son claves distintas.
+    """
+    text = (code or "").strip()
+    if is_dotted_code(text):
+        return text
     return _NON_ALNUM.sub("", code).upper()
+
+
+def sort_key(key: str) -> str:
+    """Orden natural de claves: MasterFormat primero; '4.28.2' antes que '4.28.10'."""
+    if "." in key:
+        return "1" + ".".join(part.zfill(4) for part in key.split("."))
+    return "0" + key
 
 
 def strip_accents(text: str) -> str:

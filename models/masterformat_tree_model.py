@@ -1,11 +1,14 @@
-"""Árbol División › nivel 2 › 3 › 4 del catálogo MasterFormat, con filtro recursivo."""
+"""Árbol División › nivel 2 › 3 › 4 del catálogo MasterFormat (+ raíz «Cláusulas»), con filtro recursivo."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from PyQt6.QtCore import QAbstractItemModel, QMimeData, QModelIndex, QSortFilterProxyModel, Qt
 
+from config import palette
+from models.clause_catalog import ClauseCatalog, ClauseRecord
 from models.master_catalog import CatalogRecord, MasterCatalog
+from models.relation_normalizer import search_key, sort_key
 from models.section_completer_model import build_query, matches_query
 
 ROLE_RECORD = Qt.ItemDataRole.UserRole + 1
@@ -21,22 +24,25 @@ ROLE_HAS_OVERRIDE = Qt.ItemDataRole.UserRole + 10  # el usuario corrigió la cla
 ROLE_HIDDEN = Qt.ItemDataRole.UserRole + 11        # oculta por el usuario
 ROLE_USER_ADDED = Qt.ItemDataRole.UserRole + 12    # agregada por el usuario
 ROLE_TITLE_EDITED = Qt.ItemDataRole.UserRole + 13  # título editado por el usuario
+ROLE_SOURCE = Qt.ItemDataRole.UserRole + 14        # 'mf' (MasterFormat) | 'clause' | 'group'
 
 MIME_SECTION = "application/x-specrel-section"
 
 
 @dataclass
 class _Node:
-    record: CatalogRecord | None
+    record: CatalogRecord | ClauseRecord | None
     parent: "_Node | None" = None
     children: list["_Node"] = field(default_factory=list)
     row: int = 0
+    source: str = "mf"
 
 
 class MasterFormatTreeModel(QAbstractItemModel):
-    def __init__(self, catalog: MasterCatalog, parent=None) -> None:
+    def __init__(self, catalog: MasterCatalog, parent=None, *, clauses: ClauseCatalog | None = None) -> None:
         super().__init__(parent)
         self.catalog = catalog
+        self.clauses: ClauseCatalog = clauses if clauses is not None else ClauseCatalog()
         self._root = _Node(None)
         self._by_key: dict[str, _Node] = {}
         self._project_keys: set[str] = set()
@@ -68,7 +74,31 @@ class MasterFormatTreeModel(QAbstractItemModel):
             parent.children.sort(key=lambda n: n.record.code_key if n.record else "")
             for i, child in enumerate(parent.children):
                 child.row = i
+        self._append_clauses()
         self.endResetModel()
+
+    def _append_clauses(self) -> None:
+        """Raíz «Cláusulas 4.28» al final del árbol: cláusulas y, debajo, sus subcláusulas."""
+        if not self.clauses.available:
+            return
+        group_rec = ClauseRecord(code_key="", code=self.clauses.root_label, title="", level=0, parent_key=None)
+        group = _Node(group_rec, parent=self._root, row=len(self._root.children), source="group")
+        self._root.children.append(group)
+        for clause in self.clauses.roots():
+            node = _Node(clause, parent=group, row=len(group.children), source="clause")
+            group.children.append(node)
+            self._by_key[clause.code_key] = node
+            for sub in self.clauses.children(clause.code_key):
+                child = _Node(sub, parent=node, row=len(node.children), source="clause")
+                node.children.append(child)
+                self._by_key[sub.code_key] = child
+
+    @property
+    def clause_group_index(self) -> QModelIndex:
+        for node in self._root.children:
+            if node.source == "group":
+                return self.index_for_node(node)
+        return QModelIndex()
 
     def set_project_keys(self, keys: set[str]) -> None:
         changed = self._project_keys ^ keys
@@ -127,12 +157,71 @@ class MasterFormatTreeModel(QAbstractItemModel):
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsDragEnabled
+        base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.internalPointer().source == "group":
+            return base  # el grupo «Cláusulas» no se arrastra ni se agrega
+        return base | Qt.ItemFlag.ItemIsDragEnabled
+
+    def _clause_data(self, node: _Node, role: int):
+        rec: ClauseRecord = node.record
+        if node.source == "group":
+            if role == Qt.ItemDataRole.DisplayRole:
+                return rec.code
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return f"{rec.code}: {len(self.clauses)} cláusulas y subcláusulas del pliego"
+            if role == ROLE_CODE:
+                return rec.code
+            if role in (ROLE_TITLE, ROLE_CODE_KEY):
+                return ""
+            if role == ROLE_LEVEL:
+                return 1
+            if role == ROLE_SEARCH:
+                return search_key(rec.code) + " clausula clausulas"
+            if role == ROLE_CATEGORY:
+                return palette.CLAUSE_CATEGORY_NAME
+            if role == ROLE_SOURCE:
+                return "group"
+            if role in (ROLE_IN_PROJECT, ROLE_HAS_OVERRIDE, ROLE_HIDDEN, ROLE_USER_ADDED, ROLE_TITLE_EDITED):
+                return False
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
+            return rec.label
+        if role == Qt.ItemDataRole.ToolTipRole:
+            extra = " · ya está en el proyecto" if rec.code_key in self._project_keys else ""
+            return f"{rec.code} - {rec.title}\n{rec.kind_label}{extra}\nNodo rosado sin estatus ni avance"
+        if role == ROLE_CATEGORY:
+            return palette.CLAUSE_CATEGORY_NAME
+        if role == ROLE_SOURCE:
+            return "clause"
+        if role in (ROLE_HAS_OVERRIDE, ROLE_HIDDEN, ROLE_USER_ADDED, ROLE_TITLE_EDITED):
+            return False
+        if role == ROLE_RECORD:
+            return rec
+        if role == ROLE_CODE:
+            return rec.code
+        if role == ROLE_TITLE:
+            return rec.title
+        if role == ROLE_CODE_KEY:
+            return rec.code_key
+        if role == ROLE_LEVEL:
+            return 2 + rec.level   # 3 = cláusula, 4 = subcláusula: el delegate las pinta como hojas
+        if role == ROLE_IN_PROJECT:
+            return rec.code_key in self._project_keys
+        if role == ROLE_QUALITY:
+            return rec.quality
+        if role == ROLE_SEARCH:
+            return rec.search
+        return None
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
-        rec: CatalogRecord = index.internalPointer().record
+        node: _Node = index.internalPointer()
+        if node.source != "mf":
+            return self._clause_data(node, role)
+        rec: CatalogRecord = node.record
+        if role == ROLE_SOURCE:
+            return "mf"
         if role == Qt.ItemDataRole.DisplayRole:
             return rec.label
         if role == Qt.ItemDataRole.ToolTipRole:
@@ -183,8 +272,9 @@ class MasterFormatTreeModel(QAbstractItemModel):
 
     def mimeData(self, indexes) -> QMimeData:  # noqa: N802
         data = QMimeData()
-        keys = [idx.data(ROLE_CODE_KEY) for idx in indexes if idx.isValid()]
-        labels = [idx.data(Qt.ItemDataRole.DisplayRole) for idx in indexes if idx.isValid()]
+        valid = [idx for idx in indexes if idx.isValid() and idx.data(ROLE_CODE_KEY)]
+        keys = [idx.data(ROLE_CODE_KEY) for idx in valid]
+        labels = [idx.data(Qt.ItemDataRole.DisplayRole) for idx in valid]
         data.setData(MIME_SECTION, ";".join(keys).encode("utf-8"))
         data.setText("\n".join(labels))
         return data

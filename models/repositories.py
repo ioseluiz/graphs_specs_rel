@@ -31,6 +31,7 @@ def _row_section(row: sqlite3.Row) -> Section:
         border_color=row["border_color"] if "border_color" in keys else None,
         status_id=row["status_id"] if "status_id" in keys else None,
         progress=int(row["progress"] or 0) if "progress" in keys else 0,
+        kind=row["kind"] if "kind" in keys and row["kind"] else "section",
     )
 
 
@@ -140,7 +141,7 @@ class CategoryRepo(_Repo):
 
 class SectionRepo(_Repo):
     def all(self) -> list[Section]:
-        rows = self.conn.execute("SELECT * FROM sections ORDER BY code_key").fetchall()
+        rows = self.conn.execute("SELECT * FROM sections ORDER BY id").fetchall()
         return [_row_section(r) for r in rows]
 
     def get(self, section_id: int) -> Section | None:
@@ -155,14 +156,14 @@ class SectionRepo(_Repo):
     def insert(self, code: str, title: str = "", category_id: int | None = None,
                notes: str | None = None, fill_color: str | None = None,
                border_color: str | None = None, status_id: int | None = None,
-               progress: int = 0) -> Section:
+               progress: int = 0, kind: str = "section") -> Section:
         ts = now_iso()
         code = " ".join(code.split())
         cur = self.conn.execute(
             "INSERT INTO sections (code, code_key, title, category_id, notes, created_at, updated_at, "
-            "fill_color, border_color, status_id, progress) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "fill_color, border_color, status_id, progress, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (code, code_key(code), title.strip(), category_id, notes, ts, ts, fill_color, border_color,
-             status_id, int(progress)),
+             status_id, int(progress), kind),
         )
         return self.get(cur.lastrowid)  # type: ignore[return-value]
 
@@ -170,10 +171,10 @@ class SectionRepo(_Repo):
         code = " ".join(section.code.split())
         self.conn.execute(
             "UPDATE sections SET code = ?, code_key = ?, title = ?, category_id = ?, notes = ?, "
-            "updated_at = ?, fill_color = ?, border_color = ?, status_id = ?, progress = ? WHERE id = ?",
+            "updated_at = ?, fill_color = ?, border_color = ?, status_id = ?, progress = ?, kind = ? WHERE id = ?",
             (code, code_key(code), section.title.strip(), section.category_id,
              section.notes, now_iso(), section.fill_color, section.border_color,
-             section.status_id, int(section.progress), section.id),
+             section.status_id, int(section.progress), section.kind, section.id),
         )
 
     def delete(self, section_id: int) -> None:

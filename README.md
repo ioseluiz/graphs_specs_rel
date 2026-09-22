@@ -18,6 +18,24 @@ relaciones entre secciones de especificaciones tipo MasterFormat de un proyecto.
 - **Crear el mapa desde Excel/CSV**: arrastre la plantilla sobre la ventana (o «Abrir con… SpecRel») y el
   proyecto `.specrel` se crea junto al Excel con las secciones acomodadas automáticamente.
 
+## Novedades 0.4.0 (beta)
+
+- **Nodo «Cláusula»**: las cláusulas del pliego de cargos (`4.28.N`) y sus subcláusulas (`4.28.N.M`) son un tipo
+  de nodo propio: rectángulo redondeado rosado (categoría fija «Cláusula»), sin estatus, avance ni responsables;
+  solo se conectan y muestran su etiqueta. Quedan fuera de los promedios de avance y de la hoja «Por responsable».
+- **Catálogo de cláusulas empaquetado** (`assets/data/clausulas.sqlite`, 458 entradas del cliente, generado con
+  `scripts/build_clauses_catalog.py`) en el panel lateral bajo la raíz «Cláusulas 4.28», con búsqueda, doble clic
+  y arrastre. *Edición → Catálogo MasterFormat → Reemplazar catálogo de cláusulas…* carga otro Excel (Numeración |
+  Título | Tipo); *Restaurar cláusulas incluidas* vuelve al original.
+- **Claves con puntos**: `4.28.3.1` y `4.28.31` ya no colisionan (antes ambas compactaban a `42831`). Esquema v5:
+  la migración recalcula las claves, convierte en cláusulas las secciones `4.28.x` existentes (pierden estatus,
+  avance y responsables) y pasa la categoría «Otra» de rosado a gris.
+- Plantilla Excel: una fila con numeración de cláusula (o Categoría «Cláusula») se importa como cláusula; sus
+  columnas Estatus/Avance/Responsables se ignoran y se informa en el resumen.
+- **Saltos en cruces de flechas**: donde una flecha cruza a otra, el tramo horizontal dibuja un arco sobre el
+  vertical (como en Visio o draw.io). Casilla *Ver → Saltos en cruces de flechas* (recordada entre sesiones); se ve
+  también en PNG/SVG. Detección pura en `views/components/canvas/line_jumps.py`, recalculada por ráfaga de cambios.
+
 ## Novedades 0.3.0 (beta)
 
 - **Dos flechas por par de secciones**: `A → B` y `B → A` son relaciones independientes, cada una con su inicio
@@ -179,6 +197,9 @@ metadatos del proyecto nuevo, clasificación de archivos arrastrados).
 
 ## Convenciones del modelo
 
+- Cada sección tiene un `kind`: `section` (MasterFormat o personalizada) o `clause` (cláusula del pliego, sin
+  estatus/avance/responsables, categoría fija «Cláusula»). La clave `code_key` compacta los códigos MasterFormat
+  (`03 30 00` → `033000`) y conserva los puntos en numeraciones de cláusula (`4.28.3.1`).
 - Se guarda una relación por **par dirigido** de secciones (índice único `source_id, target_id`): `A → B` y
   `B → A` son dos flechas independientes; repetir la misma dirección se rechaza. "← Es referenciada por" se
   almacena invertida como "Hace referencia a →". Esquema v4; la migración divide cada antigua «mutua» en dos.

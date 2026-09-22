@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 APP_NAME = "SpecRel"
 APP_DISPLAY_NAME = "SpecRel — Referencias cruzadas de especificaciones"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 APP_STAGE = "beta"   # "" cuando salga de pruebas
 APP_VERSION_LABEL = f"{APP_VERSION} ({APP_STAGE})" if APP_STAGE else APP_VERSION
 APP_ORG = "ACP"
@@ -46,6 +46,8 @@ DATA_DIR = ASSETS_DIR / "data"
 STYLES_DIR = BASE_DIR / "views" / "styles"
 MASTER_CATALOG_PATH = DATA_DIR / "masterformat_2020.sqlite"   # catálogo MasterFormat empaquetado
 USER_CATALOG_FILENAME = "masterformat_user.sqlite"            # copia del usuario (reemplaza al empaquetado)
+CLAUSE_CATALOG_PATH = DATA_DIR / "clausulas.sqlite"           # cláusulas del pliego (4.28.x) empaquetadas
+USER_CLAUSE_CATALOG_FILENAME = "clausulas_user.sqlite"
 
 
 def appdata_dir() -> Path:
@@ -64,6 +66,10 @@ def ensure_appdata_dir() -> Path:
 
 def user_catalog_path() -> Path:
     return appdata_dir() / USER_CATALOG_FILENAME
+
+
+def user_clause_catalog_path() -> Path:
+    return appdata_dir() / USER_CLAUSE_CATALOG_FILENAME
 
 
 def category_overrides_path() -> Path:

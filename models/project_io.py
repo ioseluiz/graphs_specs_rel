@@ -46,12 +46,14 @@ EXAMPLE_SECTIONS = [
     ("31 23 00", "Excavación", "Técnica / constructiva", "", "Aprobada", 100, "INIG", ""),
     ("01 31 19", "Conferencia inicial", "Contractual", "", "No iniciada", 0, "INI-PY", ""),
     ("01 35 29", "Requisitos de seguridad", "Auxiliar / apoyo", "#DDEBF7", "En revisión", 40, "INIO", ""),
+    ("4.28.61", "PAGO FINAL", "Cláusula", "", "", "", "", "Cláusula del pliego: sin estatus ni avance"),
 ]
 EXAMPLE_RELATIONS = [
     ("31 23 00 - Excavación", UiKind.REFERENCES.value, "03 30 00 - Concreto", ""),
     ("01 31 19", UiKind.REFERENCED_BY.value, "31 23 00", "Ver artículo 3.2"),
     ("01 35 29", UiKind.REFERENCES.value, "03 30 00", ""),
     ("03 30 00", UiKind.REFERENCES.value, "01 35 29", "Sentido contrario: son dos flechas"),
+    ("01 31 19", UiKind.REFERENCES.value, "4.28.61", ""),
 ]
 HELP_LINES = [
     "Plantilla de SpecRel para crear un mapa de referencias desde Excel.",
@@ -72,6 +74,8 @@ HELP_LINES = [
     "  Avance      -> porcentaje 0 a 100.",
     "  Responsables-> códigos separados por coma (INIO, INIG, …); los desconocidos se crean.",
     "  Observaciones -> texto libre.",
+    "  Cláusulas del pliego (4.28.N o 4.28.N.M): se reconocen por su numeración (o Categoría = Cláusula).",
+    "              Son nodos rosados sin estatus, avance ni responsables: esas columnas se ignoran.",
     "",
     "Hoja 'Relaciones': una fila por relación (flecha).",
     "  Sección A / Sección B -> número, o 'número - descripción'. Las secciones inexistentes se crean.",
@@ -511,17 +515,47 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
         if not code_key(code):
             summary.errors.append(f"Secciones fila {i}: número vacío o inválido ({raw_code!r}).")
             continue
-        category_id = resolve_category(row.get("category", ""), code)
+        category_id = None if model.is_clause_code(code) else resolve_category(row.get("category", ""), code)
         color = _valid_hex(row.get("color", ""))
         if row.get("color", "").strip() and color is None:
             summary.errors.append(f"Secciones fila {i}: color inválido {row.get('color')!r}, se ignora.")
-        status_id = resolve_status(row.get("status", ""))
+        clause_row = model.is_clause_code(code) or search_key(row.get("category", "")).strip() in ("clausula", "clausulas")
+        status_id = None if clause_row else resolve_status(row.get("status", ""))
         progress = parse_progress(row.get("progress", ""))
         if row.get("progress", "").strip() and progress is None:
             summary.errors.append(f"Secciones fila {i}: avance inválido {row.get('progress')!r}, se ignora.")
-        responsible_ids = resolve_responsibles(row.get("responsibles", "")) if row.get("responsibles", "").strip() else None
+        responsible_ids = (resolve_responsibles(row.get("responsibles", ""))
+                           if row.get("responsibles", "").strip() and not clause_row else None)
         observations = row.get("observations", "").strip() or None
         existing = model.section_by_code(code)
+        is_clause = (existing.is_clause if existing is not None else False) or model.is_clause_code(code) \
+            or search_key(row.get("category", "")).strip() in ("clausula", "clausulas")
+        if is_clause:
+            ignored = [name for name, field_name in (("Estatus", "status"), ("Avance", "progress"),
+                                                     ("Responsables", "responsibles"))
+                       if row.get(field_name, "").strip()]
+            if ignored:
+                summary.errors.append(f"Secciones fila {i}: {code} es una cláusula; se ignoran "
+                                      f"{', '.join(ignored)}.")
+            if existing is None:
+                entry = model.catalog_entry(code)
+                if entry is not None:
+                    code = entry.code
+                    title = title or entry.title
+                section = model.add_section(code, title, kind="clause")
+                if color or observations:
+                    model.update_section(section.id, section.code, title, section.category_id, observations,
+                                         color if color else None, None)
+                summary.sections_created += 1
+            else:
+                new_title = title or existing.title
+                new_notes = observations if observations is not None else existing.notes
+                if new_title != existing.title or new_notes != existing.notes or (color and color != existing.fill_color):
+                    model.update_section(existing.id, existing.code, new_title, existing.category_id, new_notes,
+                                         color if color else existing.fill_color,
+                                         None if color else existing.border_color)
+                    summary.sections_updated += 1
+            continue
         if existing is None:
             section = model.add_section(code, title, category_id)
             model.update_section(section.id, section.code, title, category_id, observations,
@@ -615,7 +649,7 @@ def export_tables_xlsx(model: "ProjectModel", path: Path) -> None:
         st = model.status(s.status_id)
         resp = ", ".join(r.code for r in model.section_responsibles(s.id))
         ws_sec.append([s.code, s.title, cat.name if cat else "", s.fill_color or "",
-                       st.name if st else "", s.progress, resp, s.notes or ""])
+                       st.name if st else "", "" if s.is_clause else s.progress, resp, s.notes or ""])
     for rel in model.relations():
         a_id, kind, b_id = denormalize(rel)
         sa, sb = model.section(a_id), model.section(b_id)

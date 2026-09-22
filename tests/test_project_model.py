@@ -223,3 +223,44 @@ def test_update_category_signals_sections(model, spy):
     model.update_category(cat)
     assert len(updated) == 1 and updated.calls[0][0] == a.id
     assert model.category(cat.id).fill_color == "#123456"
+
+
+def test_clause_from_catalog_has_no_status_and_fixed_category(model, spy):
+    if not model.clauses.available:
+        pytest.skip("catálogo de cláusulas no disponible")
+    c, created = model.create_section_from_catalog("4.28.61")
+    assert created and c.is_clause and c.kind == "clause"
+    assert c.title == "PAGO FINAL" and c.status_id is None and c.progress == 0
+    cat = model.category(c.category_id)
+    assert cat.name == "Cláusula" and cat.fill_color == "#F8CBF0"
+    updated = spy(model.sectionUpdated)
+    model.set_section_status(c.id, model.default_status().id)
+    model.set_section_progress(c.id, 60)
+    model.set_section_responsibles(c.id, [model.responsibles()[0].id])
+    assert len(updated) == 0
+    s = model.section(c.id)
+    assert s.status_id is None and s.progress == 0 and model.section_responsibles(c.id) == []
+    # Editar el título conserva el tipo y la categoría fija aunque se pida otra.
+    other = model.categories()[0]
+    model.update_section(c.id, c.code, "Pago final (rev.)", other.id, "nota", status_id=1, progress=90)
+    s = model.section(c.id)
+    assert s.is_clause and s.category_id == c.category_id and s.status_id is None and s.progress == 0
+    assert s.title == "Pago final (rev.)"
+
+
+def test_free_text_and_colliding_clause_codes(model):
+    if not model.clauses.available:
+        pytest.skip("catálogo de cláusulas no disponible")
+    a, created = model.get_or_create_section("4.28.3.1 Retención de impuestos")
+    b, _ = model.get_or_create_section("4.28.31")
+    assert created and a.is_clause and b.is_clause and a.id != b.id
+    assert a.code_key == "4.28.3.1" and b.code_key == "4.28.31"
+    assert model.section_by_code("4.28.3.1").id == a.id and model.section_by_code("4.28.31").id == b.id
+    assert model.is_clause_code("4.28.3.1") and not model.is_clause_code("03 30 00")
+    assert model.reclassify_from_catalog() == []
+
+
+def test_sections_are_naturally_ordered(model):
+    for code in ("4.28.10", "31 23 00", "4.28.2", "03 30 00"):
+        model.add_section(code, kind="clause" if "." in code else "section")
+    assert [s.code for s in model.sections()] == ["03 30 00", "31 23 00", "4.28.2", "4.28.10"]

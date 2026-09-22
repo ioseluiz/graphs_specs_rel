@@ -27,9 +27,15 @@ Las secciones que ya están en el proyecto aparecen primero, con su color.
   azul auxiliar). El punto verde marca las secciones que ya están en el proyecto. «⚠» señala títulos que el
   catálogo trae incompletos.
 
+## Cláusulas del pliego
+
+Las cláusulas del pliego de cargos (`4.28.N` y subcláusulas `4.28.N.M`) están al final del árbol, bajo la raíz
+**«Cláusulas 4.28»**, y también en el autocompletado. Son nodos rosados con esquinas redondeadas, sin estatus,
+avance ni responsables. Vea el tema *Cláusulas del pliego*.
+
 ## Secciones que no están en MasterFormat
 
-Para códigos propios del proyecto (por ejemplo `4.28.33 Sitio de obra`) use el botón
+Para códigos propios del proyecto que tampoco sean cláusulas (por ejemplo `AX-01 Anexo`) use el botón
 **Sección personalizada…** debajo de la entrada, o **Edición → Nueva sección…**. Si el número que escribió
 coincide con una sección del catálogo, el cuadro le sugiere usarla.
 

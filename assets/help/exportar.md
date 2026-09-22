@@ -38,7 +38,8 @@ Este reporte es de solo lectura; para editar en Excel y reimportar use *Tablas �
 2. Complete las tablas. Las secciones pueden escribirse como `03 30 00` o `03 30 00 - Concreto`. En
    Relación acepta los dos textos de la app y también `->` y `<-`. Si dos secciones se referencian entre sí,
    escriba **dos filas** (A → B y B → A): cada dirección es una flecha. Responsables: códigos separados por
-   coma.
+   coma. Una fila con numeración de cláusula (`4.28.61`) o Categoría «Cláusula» se carga como cláusula:
+   Estatus, Avance y Responsables se ignoran y el resumen lo indica.
 3. **Arrastre el archivo sobre la ventana de SpecRel** (o pulse *Crear mapa desde Excel/CSV…* en la pantalla
    de inicio, o Ctrl+I). Sin proyecto abierto, SpecRel crea el archivo del proyecto (`.specrel`) **junto al
    Excel, con el mismo nombre**, carga las tablas, acomoda las secciones automáticamente y muestra el mapa.

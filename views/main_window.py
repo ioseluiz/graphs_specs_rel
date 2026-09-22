@@ -116,6 +116,10 @@ class MainWindow(QMainWindow):
         self.act_show_extras = make("Mostrar avance y responsables", "analysis", "F6", checkable=True,
                                     tip="Círculos de responsables y barra de avance en cada sección del mapa")
         self.act_show_extras.setChecked(True)
+        self.act_line_jumps = make("Saltos en cruces de flechas", "connect", checkable=True,
+                                   tip="Donde una flecha cruza a otra, el tramo horizontal dibuja un pequeño arco "
+                                       "sobre el vertical (como en Visio o draw.io). Se ve también en PNG/SVG.")
+        self.act_line_jumps.setChecked(True)
         self.act_responsibles = make("Responsables…", "categories",
                                      tip="Unidades responsables (INIO, INIG, …): agregar, editar, borrar, reordenar")
         self.act_statuses = make("Estatus…", "categories", tip="Estados de elaboración de las secciones")
@@ -137,6 +141,10 @@ class MainWindow(QMainWindow):
         self.act_replace_catalog = make("Reemplazar catálogo MasterFormat…", "import",
                                         tip="Cargar otro listado MasterFormat (Excel/CSV) para todos los proyectos")
         self.act_reset_catalog = make("Restaurar catálogo incluido", "clear")
+        self.act_replace_clauses = make("Reemplazar catálogo de cláusulas…", "import",
+                                        tip="Excel o CSV con columnas Numeración | Título | Tipo "
+                                            "(Cláusula / Subcláusula), para todos los proyectos")
+        self.act_reset_clauses = make("Restaurar cláusulas incluidas", "clear")
         self.act_apply_catalog_categories = make(
             "Aplicar clasificación del catálogo a las secciones del proyecto…", "categories",
             tip="Reasigna la categoría de las secciones del proyecto según la clasificación del catálogo")
@@ -195,6 +203,8 @@ class MainWindow(QMainWindow):
         m_catalog.addSeparator()
         m_catalog.addActions([self.act_export_catalog, self.act_replace_catalog, self.act_reset_catalog])
         m_catalog.addSeparator()
+        m_catalog.addActions([self.act_replace_clauses, self.act_reset_clauses])
+        m_catalog.addSeparator()
         m_catalog.addActions([self.act_import_catalog, self.act_clear_catalog])
 
         m_view = bar.addMenu("&Ver")
@@ -202,7 +212,8 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         m_view.addActions([self.act_fit, self.act_zoom_in, self.act_zoom_out, self.act_zoom_reset])
         m_view.addSeparator()
-        m_view.addActions([self.act_snap, self.act_grid, self.act_show_extras, self.act_arrange_new])
+        m_view.addActions([self.act_snap, self.act_grid, self.act_show_extras, self.act_line_jumps,
+                           self.act_arrange_new])
 
         m_help = bar.addMenu("A&yuda")
         m_help.addActions([self.act_manual, self.act_shortcuts])
@@ -345,9 +356,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ panel del catálogo
     def _build_catalog_dock(self, tree_model: MasterFormatTreeModel | None) -> None:
         if tree_model is None:
+            from models.clause_catalog import ClauseCatalog
             from models.master_catalog import MasterCatalog
 
-            tree_model = MasterFormatTreeModel(MasterCatalog(), self)
+            tree_model = MasterFormatTreeModel(MasterCatalog(), self, clauses=ClauseCatalog())
         self.catalog_tree_model = tree_model
         self.catalog_panel = MasterFormatPanel(tree_model, self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.catalog_panel)
@@ -378,8 +390,8 @@ class MainWindow(QMainWindow):
                     self.act_grid, self.act_arrange_new, self.act_categories, self.act_import_catalog,
                     self.act_clear_catalog, self.act_export_tables,
                     self.act_replace_catalog, self.act_reset_catalog, self.act_apply_catalog_categories,
-                    self.act_export_catalog, self.act_add_catalog_entry,
-                    self.act_show_extras, self.act_responsibles, self.act_statuses,
+                    self.act_export_catalog, self.act_add_catalog_entry, self.act_replace_clauses,
+                    self.act_show_extras, self.act_line_jumps, self.act_responsibles, self.act_statuses,
                     self.act_export_png, self.act_export_svg, self.act_copy_image,
                     self.act_export_3d_png, self.act_export_3d_svg, self.act_copy_3d_image,
                     self.act_export_current, self.act_export_report):

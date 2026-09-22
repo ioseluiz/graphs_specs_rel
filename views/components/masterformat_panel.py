@@ -31,6 +31,7 @@ from models.masterformat_tree_model import (
     ROLE_IN_PROJECT,
     ROLE_LEVEL,
     ROLE_QUALITY,
+    ROLE_SOURCE,
     ROLE_TITLE,
     ROLE_TITLE_EDITED,
     ROLE_USER_ADDED,
@@ -133,7 +134,7 @@ class MasterFormatPanel(QDockWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filtrar por número o título (ej. 03 30 o concrete)")
+        self.search.setPlaceholderText("Filtrar por número o título (ej. 03 30, concrete o 4.28.61)")
         self.search.setClearButtonEnabled(True)
         layout.addWidget(self.search)
         row = QHBoxLayout()
@@ -165,8 +166,9 @@ class MasterFormatPanel(QDockWidget):
         self.legend.setProperty("role", "hint")
         self.legend.setWordWrap(True)
         layout.addWidget(self.legend)
-        hint = QLabel("Doble clic agrega la sección al proyecto. Arrástrela al mapa para ubicarla. "
-                      "Clic derecho para cambiar la clasificación por defecto.")
+        hint = QLabel("Doble clic agrega la sección o cláusula al proyecto. Arrástrela al mapa para ubicarla. "
+                      "Clic derecho para cambiar la clasificación por defecto. Las cláusulas del pliego "
+                      "(4.28.x) están al final del árbol.")
         hint.setProperty("role", "hint")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -219,7 +221,11 @@ class MasterFormatPanel(QDockWidget):
 
     def _update_count(self) -> None:
         total = len(self.tree_model.catalog)
-        self.count_label.setText(f"{total:,} secciones".replace(",", "."))
+        text = f"{total:,} secciones".replace(",", ".")
+        clauses = len(self.tree_model.clauses)
+        if clauses:
+            text += f" · {clauses} cláusulas"
+        self.count_label.setText(text)
 
     def selected_keys(self) -> list[str]:
         return [idx.data(ROLE_CODE_KEY) for idx in self.tree.selectionModel().selectedIndexes() if idx.isValid()]
@@ -245,14 +251,24 @@ class MasterFormatPanel(QDockWidget):
         in_project = bool(index.data(ROLE_IN_PROJECT))
         current = str(index.data(ROLE_CATEGORY) or "")
         level = int(index.data(ROLE_LEVEL) or 3)
+        source = str(index.data(ROLE_SOURCE) or "mf")
         menu = QMenu(self)
         menu.addSection(index.data(Qt.ItemDataRole.DisplayRole))
+        if source == "group":
+            menu.addAction("Expandir", lambda: self.tree.expandRecursively(index))
+            menu.addAction("Contraer", lambda: self.tree.collapse(index))
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            return
         act_add = menu.addAction("Agregar al proyecto", lambda: self.addRequested.emit(key))
         act_add.setEnabled(not in_project)
         menu.addAction("Usar como Sección A", lambda: self.useAsRequested.emit("a", key))
         menu.addAction("Usar como Sección B", lambda: self.useAsRequested.emit("b", key))
         if in_project:
             menu.addAction("Centrar en el mapa", lambda: self.centerRequested.emit(key))
+        if source == "clause":
+            # Las cláusulas no se reclasifican ni se editan desde el árbol: el catálogo se reemplaza completo.
+            menu.exec(self.tree.viewport().mapToGlobal(pos))
+            return
         menu.addSeparator()
         cat_menu = menu.addMenu(f"Clasificación por defecto (actual: {current or 'sin clasificar'})")
         branch_label = "toda la rama" if level < 4 else "esta sección"

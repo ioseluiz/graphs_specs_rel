@@ -53,12 +53,15 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
 
     meta = model.meta()
     sections = model.sections()
+    # Las cláusulas del pliego no tienen estatus, avance ni responsables: quedan fuera de los indicadores.
+    plain = [s for s in sections if not s.is_clause]
+    clauses = [s for s in sections if s.is_clause]
     relations = model.relations()
     now = datetime.now()
     stats = ReportStats(path=path, sections=len(sections), relations=len(relations))
-    stats.avg_progress = (sum(s.progress for s in sections) / len(sections)) if sections else 0.0
-    stats.completed = sum(1 for s in sections if s.progress >= 100)
-    stats.without_responsible = sum(1 for s in sections if not model.section_responsible_ids(s.id))
+    stats.avg_progress = (sum(s.progress for s in plain) / len(plain)) if plain else 0.0
+    stats.completed = sum(1 for s in plain if s.progress >= 100)
+    stats.without_responsible = sum(1 for s in plain if not model.section_responsible_ids(s.id))
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor=HEADER_FILL)
@@ -105,14 +108,15 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
     row = 5
     ws.cell(row=row, column=1, value="Indicadores").font = sub_font
     row += 1
-    in_progress = sum(1 for s in sections if 0 < s.progress < 100)
+    in_progress = sum(1 for s in plain if 0 < s.progress < 100)
     cards = [
-        ("Secciones", len(sections)),
+        ("Secciones", len(plain)),
+        ("Cláusulas del pliego", len(clauses)),
         ("Relaciones", len(relations)),
         ("Avance promedio", round(stats.avg_progress)),
         ("Secciones al 100 %", stats.completed),
         ("Secciones en curso (1–99 %)", in_progress),
-        ("Secciones sin avance (0 %)", sum(1 for s in sections if s.progress == 0)),
+        ("Secciones sin avance (0 %)", sum(1 for s in plain if s.progress == 0)),
         ("Secciones sin responsable", stats.without_responsible),
     ]
     for label, value in cards:
@@ -129,7 +133,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
     write_header(ws, row, ["Estatus", "Secciones", "% del total", "Avance promedio"])
     row += 1
     groups: dict[int | None, list] = {}
-    for s in sections:
+    for s in plain:
         groups.setdefault(s.status_id, []).append(s)
     ordered = [st.id for st in model.statuses()] + [None]
     for sid in ordered:
@@ -140,7 +144,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
         c = ws.cell(row=row, column=1, value=st.name if st else "(sin estatus)")
         colored(c, st.color if st else None, palette.SURFACE_ALT)
         ws.cell(row=row, column=2, value=len(items)).border = border
-        pct = ws.cell(row=row, column=3, value=round(100 * len(items) / len(sections)) if sections else 0)
+        pct = ws.cell(row=row, column=3, value=round(100 * len(items) / len(plain)) if plain else 0)
         pct.number_format, pct.border = '0"%"', border
         avg = ws.cell(row=row, column=4, value=round(sum(s.progress for s in items) / len(items)))
         avg.number_format, avg.border = '0"%"', border
@@ -152,7 +156,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
     write_header(ws, row, ["Responsable", "Nombre", "Secciones", "Avance promedio", "Al 100 %", "En curso"])
     row += 1
     for resp in model.responsibles():
-        mine = [s for s in sections if resp.id in model.section_responsible_ids(s.id)]
+        mine = [s for s in plain if resp.id in model.section_responsible_ids(s.id)]
         c = ws.cell(row=row, column=1, value=resp.code)
         colored(c, resp.color, palette.BORDER_STRONG)
         c.font = Font(bold=True, color=palette.contrast_text(resp.color).lstrip("#"))
@@ -185,12 +189,16 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
         c = ws.cell(row=row, column=1, value=cat.name if cat else "(sin categoría)")
         colored(c, cat.fill_color if cat else None, palette.SURFACE_ALT)
         ws.cell(row=row, column=2, value=len(items)).border = border
-        avg = ws.cell(row=row, column=3, value=round(sum(s.progress for s in items) / len(items)))
+        measurable = [s for s in items if not s.is_clause]
+        avg = ws.cell(row=row, column=3,
+                      value=round(sum(s.progress for s in measurable) / len(measurable)) if measurable else None)
         avg.number_format, avg.border = '0"%"', border
         row += 1
     row += 1
     ws.cell(row=row, column=1, value="El avance promedio es la media simple del porcentaje de cada sección. "
-                                      "Una sección con varios responsables cuenta para cada uno de ellos.").font = hint_font
+                                      "Una sección con varios responsables cuenta para cada uno de ellos. "
+                                      "Las cláusulas del pliego no tienen estatus ni avance y se excluyen de los "
+                                      "promedios.").font = hint_font
 
     # ------------------------------------------------------------------ Secciones
     ws2 = wb.create_sheet(SHEET_SECTIONS)
@@ -202,7 +210,8 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
         r = i + 1
         st, cat = status_of(s), category_of(s)
         resp = ", ".join(x.code for x in model.section_responsibles(s.id))
-        values = [i, s.code, s.title, cat.name if cat else "", st.name if st else "", s.progress, resp,
+        values = [i, s.code, s.title, cat.name if cat else "", st.name if st else "",
+                  None if s.is_clause else s.progress, resp,
                   s.notes or "", G.out_degree(s.id) if s.id in G else 0, G.in_degree(s.id) if s.id in G else 0,
                   (s.updated_at or "").replace("T", " ")]
         for col, value in enumerate(values, start=1):
@@ -229,7 +238,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
     write_header(ws3, 1, headers3, [14, 30, 14, 40, 24, 18, 12, 50])
     r = 2
     for resp in model.responsibles():
-        for s in sections:
+        for s in plain:
             if resp.id not in model.section_responsible_ids(s.id):
                 continue
             st, cat = status_of(s), category_of(s)
@@ -244,7 +253,7 @@ def export_report_xlsx(model: "ProjectModel", path: Path, map_image: Path | None
             ws3.cell(row=r, column=7).number_format = '0"%"'
             ws3.cell(row=r, column=8).alignment = wrap
             r += 1
-    for s in sections:
+    for s in plain:
         if model.section_responsible_ids(s.id):
             continue
         st, cat = status_of(s), category_of(s)

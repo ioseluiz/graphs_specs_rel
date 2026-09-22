@@ -16,7 +16,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ("assets", "assets"),               # incluye assets/data/masterformat_2020.sqlite
+        ("assets", "assets"),               # incluye assets/data/masterformat_2020.sqlite y clausulas.sqlite
         ("views/styles", "views/styles"),
     ],
     hiddenimports=hiddenimports,

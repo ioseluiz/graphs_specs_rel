@@ -102,6 +102,12 @@ def _selftest() -> int:
     assert model.master.available, "catálogo MasterFormat no encontrado"
     assert model.master.get("03 30 00") is not None
     print(f"catálogo MasterFormat: {len(model.master)} secciones ({model.master.path})")
+    assert model.clauses.available, "catálogo de cláusulas no encontrado"
+    clause = model.clauses.get("4.28.61")
+    assert clause is not None and clause.title == "PAGO FINAL", clause
+    c, _created = model.create_section_from_catalog("4.28.61")
+    assert c.is_clause and c.status_id is None and model.category(c.category_id).name == "Cláusula"
+    print(f"catálogo de cláusulas: {len(model.clauses)} entradas ({model.clauses.path})")
     try:
         import pyqtgraph.opengl  # noqa: F401
         print("pyqtgraph.opengl importado correctamente")
@@ -143,15 +149,18 @@ def main() -> int:
         from models.section_completer_model import SectionCompleterModel
         from views.main_window import MainWindow
 
+        from models.clause_catalog import ClauseCatalog
+
         master = MasterCatalog()
-        project = ProjectModel(master=master)
+        clauses = ClauseCatalog()
+        project = ProjectModel(master=master, clauses=clauses)
         table_model = RelationsTableModel(project)
         completer_model = SectionCompleterModel()
         if splash is not None:
             splash.showMessage(f"{APP_NAME} {APP_VERSION_LABEL}\nPreparando la ventana…",
                                Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
             QApplication.processEvents()
-        tree_model = MasterFormatTreeModel(master)
+        tree_model = MasterFormatTreeModel(master, clauses=clauses)
         window = MainWindow(table_model, completer_model, tree_model)
         controller = MainController(project, window, table_model, completer_model)  # noqa: F841
         initial = next((a for a in sys.argv[1:] if not a.startswith("-")), None)

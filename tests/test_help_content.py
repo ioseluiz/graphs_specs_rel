@@ -4,8 +4,8 @@ import json
 
 from models.help_content import HELP_DIR, HelpContent
 
-EXPECTED = ["inicio", "secciones", "relaciones", "mapa", "estatus", "categorias", "analisis", "vista3d",
-            "exportar", "atajos", "faq"]
+EXPECTED = ["inicio", "secciones", "clausulas", "relaciones", "mapa", "estatus", "categorias", "analisis",
+            "vista3d", "exportar", "atajos", "faq"]
 
 
 def test_bundled_manual_loads_all_topics():

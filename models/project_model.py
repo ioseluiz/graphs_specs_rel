@@ -31,12 +31,14 @@ from models.entities import (
 )
 from models.graph_engine import GraphEngine
 from models.layout_engine import place_new_node
+from models.clause_catalog import ClauseCatalog
 from models.master_catalog import CatalogRecord, MasterCatalog, normalize_code
 from models.relation_normalizer import (
     DuplicateRelationError,
     SelfRelationError,
     code_key,
     normalize,
+    sort_key,
     split_code_title,
 )
 from models.repositories import (
@@ -85,11 +87,13 @@ class ProjectModel(QObject):
     positionChanged = pyqtSignal(int, float, float)
     graphChanged = pyqtSignal()  # coalescida: análisis y 3D se refrescan aquí
 
-    def __init__(self, parent: QObject | None = None, master: MasterCatalog | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, master: MasterCatalog | None = None,
+                 clauses: ClauseCatalog | None = None) -> None:
         super().__init__(parent)
         self.db: ProjectDatabase | None = None
         self.path: Path | None = None
         self.master: MasterCatalog = master if master is not None else MasterCatalog()
+        self.clauses: ClauseCatalog = clauses if clauses is not None else ClauseCatalog()
         self.graph = GraphEngine()
         self._sections: dict[int, Section] = {}
         self._relations: dict[int, Relation] = {}
@@ -244,7 +248,7 @@ class ProjectModel(QObject):
         return self.project_repo.get() if self.db else ProjectMeta()
 
     def sections(self) -> list[Section]:
-        return sorted(self._sections.values(), key=lambda s: s.code_key)
+        return sorted(self._sections.values(), key=lambda s: sort_key(s.code_key))
 
     def section(self, section_id: int) -> Section | None:
         return self._sections.get(section_id)
@@ -320,9 +324,13 @@ class ProjectModel(QObject):
         return list(self._catalog.values())
 
     def catalog_entry(self, code: str) -> CatalogEntry | None:
-        """Catálogo del proyecto primero (extras/traducciones), luego el catálogo maestro MasterFormat."""
+        """Cláusulas del pliego primero; luego catálogo del proyecto (extras/traducciones) y MasterFormat."""
         key = code_key(normalize_code(code))
         local = self._catalog.get(key)
+        clause = self.clauses.get(key)
+        if clause is not None:
+            title = local.title if local is not None and local.title.strip() else clause.title
+            return CatalogEntry(clause.code_key, clause.code, title, palette.CLAUSE_CATEGORY_NAME, kind="clause")
         record = self.master.get(key)
         if local is not None:
             category = local.category_name or (self.master.effective_category(record) if record else None)
@@ -356,6 +364,13 @@ class ProjectModel(QObject):
     def master_record(self, code: str) -> CatalogRecord | None:
         return self.master.get(code)
 
+    def is_clause_code(self, code: str) -> bool:
+        return self.clauses.get(code) is not None
+
+    def clause_category(self) -> Category | None:
+        """Categoría fija de las cláusulas (se crea con los colores semilla si el proyecto no la tiene)."""
+        return self.category_by_name(palette.CLAUSE_CATEGORY_NAME, create=True)
+
     def create_section_from_catalog(self, code_or_key: str, near: Iterable[int] = (),
                                     category_id: int | None = None) -> tuple[Section, bool]:
         """Crea (o devuelve) la sección correspondiente a una entrada del catálogo, con código canónico."""
@@ -370,7 +385,7 @@ class ProjectModel(QObject):
         if category_id is None and entry.category_name:
             cat = self.category_by_name(entry.category_name, create=True)
             category_id = cat.id if cat else None
-        return self.add_section(entry.code, entry.title, category_id, pos), True
+        return self.add_section(entry.code, entry.title, category_id, pos, kind=entry.kind), True
 
     def reclassify_from_catalog(self, apply: bool = False) -> list[tuple[Section, Category]]:
         """Secciones del proyecto cuya categoría difiere de la clasificación del catálogo.
@@ -380,8 +395,10 @@ class ProjectModel(QObject):
         """
         changes: list[tuple[Section, Category]] = []
         for section in self.sections():
+            if section.is_clause:
+                continue  # la categoría de una cláusula es fija
             entry = self.catalog_entry(section.code)
-            if entry is None or not entry.category_name:
+            if entry is None or not entry.category_name or entry.kind == "clause":
                 continue
             cat = self.category_by_name(entry.category_name, create=apply)
             if cat is None or cat.id == section.category_id:
@@ -508,6 +525,8 @@ class ProjectModel(QObject):
 
     def set_section_responsibles(self, section_id: int, responsible_ids: list[int]) -> None:
         assert self.db is not None
+        if self._sections[section_id].is_clause:
+            return  # las cláusulas no tienen responsables
         ids = [rid for rid in dict.fromkeys(responsible_ids) if rid in self._responsibles]
         if ids == self.section_responsible_ids(section_id):
             return
@@ -519,11 +538,15 @@ class ProjectModel(QObject):
 
     def set_section_status(self, section_id: int, status_id: int | None) -> None:
         s = self._sections[section_id]
+        if s.is_clause:
+            return  # las cláusulas no tienen estatus
         if s.status_id != status_id:
             self.update_section(section_id, s.code, s.title, s.category_id, s.notes, status_id=status_id)
 
     def set_section_progress(self, section_id: int, progress: int) -> None:
         s = self._sections[section_id]
+        if s.is_clause:
+            return  # las cláusulas no tienen avance
         progress = max(0, min(100, int(progress)))
         if s.progress != progress:
             self.update_section(section_id, s.code, s.title, s.category_id, s.notes, progress=progress)
@@ -536,19 +559,27 @@ class ProjectModel(QObject):
 
     # ------------------------------------------------------------------ secciones
     def add_section(self, code: str, title: str = "", category_id: int | None = None,
-                    position: tuple[float, float] | None = None) -> Section:
-        """Idempotente por code_key: si existe, la devuelve sin modificar."""
+                    position: tuple[float, float] | None = None, kind: str = "section") -> Section:
+        """Idempotente por code_key: si existe, la devuelve sin modificar.
+
+        `kind="clause"`: cláusula del pliego, con categoría fija «Cláusula», sin estatus ni avance.
+        """
         assert self.db is not None
         existing = self.section_by_code(code)
         if existing is not None:
             return existing
-        if category_id is None:
-            default = self.default_category()
-            category_id = default.id if default else None
-        default_status = self.default_status()
+        if kind == "clause":
+            cat = self.clause_category()
+            category_id = cat.id if cat else None
+            status_id = None
+        else:
+            if category_id is None:
+                default = self.default_category()
+                category_id = default.id if default else None
+            default_status = self.default_status()
+            status_id = default_status.id if default_status else None
         with self.db.transaction():
-            section = self.sections_repo.insert(code, title, category_id,
-                                                status_id=default_status.id if default_status else None)
+            section = self.sections_repo.insert(code, title, category_id, status_id=status_id, kind=kind)
             if position is None:
                 position = place_new_node({k: (p.x, p.y) for k, p in self._positions.items()})
             self.positions_repo.upsert(section.id, position[0], position[1], False)
@@ -587,7 +618,7 @@ class ProjectModel(QObject):
         if entry is not None and entry.category_name:
             cat = self.category_by_name(entry.category_name, create=True)
             category_id = cat.id if cat else None
-        return self.add_section(code, title, category_id, pos), True
+        return self.add_section(code, title, category_id, pos, kind=entry.kind if entry else "section"), True
 
     def update_section(self, section_id: int, code: str, title: str,
                        category_id: int | None, notes: str | None = None,
@@ -607,9 +638,12 @@ class ProjectModel(QObject):
             border = derive_border_color(fill)
         new_status = section.status_id if status_id is KEEP else status_id
         new_progress = section.progress if progress is KEEP else max(0, min(100, int(progress)))  # type: ignore[arg-type]
+        if section.is_clause:
+            # Una cláusula no tiene estatus ni avance y su categoría es fija.
+            new_status, new_progress, category_id = None, 0, section.category_id
         updated = Section(section.id, code, code_key(code), title, category_id, notes,
                           section.created_at, section.updated_at, fill, border if fill else None,
-                          new_status, new_progress)
+                          new_status, new_progress, section.kind)
         with self.db.transaction():
             self.sections_repo.update(updated)
             self.db.touch()
@@ -833,7 +867,7 @@ class ProjectSnapshot:
         return self._meta
 
     def sections(self) -> list[Section]:
-        return sorted(self._sections.values(), key=lambda s: s.code_key)
+        return sorted(self._sections.values(), key=lambda s: sort_key(s.code_key))
 
     def section(self, section_id: int) -> Section | None:
         return self._sections.get(section_id)

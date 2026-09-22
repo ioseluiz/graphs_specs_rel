@@ -40,12 +40,14 @@ def test_template_roundtrip_xlsx(tmp_path, model):
     path = tmp_path / "plantilla.xlsx"
     write_template_xlsx(path)
     tables = read_tables([path])
-    assert len(tables.sections) == 4 and len(tables.relations) == 4
+    assert len(tables.sections) == 5 and len(tables.relations) == 5
     assert tables.project == {"code": "CC-26-01", "name": "Proyecto de ejemplo"}
     summary = apply_tables(model, tables)
-    assert summary.sections_created == 4
-    assert summary.relations_created == 4
+    assert summary.sections_created == 5
+    assert summary.relations_created == 5
     assert not summary.errors and not summary.skipped
+    clause = model.section_by_code("4.28.61")
+    assert clause.is_clause and clause.status_id is None and model.category(clause.category_id).name == "Cláusula"
     concreto = model.section_by_code("03 30 00")
     assert concreto.title == "Concreto"
     assert model.category(concreto.category_id).name == "Técnica / constructiva"
@@ -67,10 +69,10 @@ def test_reimport_is_idempotent_and_lists_skipped_rows(tmp_path, model):
     apply_tables(model, read_tables([path]))
     summary = apply_tables(model, read_tables([path]))
     assert summary.sections_created == 0 and summary.relations_created == 0
-    assert summary.relations_duplicated == 4
-    assert len(summary.skipped) == 4
+    assert summary.relations_duplicated == 5
+    assert len(summary.skipped) == 5
     assert all("ya existía en el proyecto" in line for line in summary.skipped)
-    assert "Filas omitidas (4)" in summary.text()
+    assert "Filas omitidas (5)" in summary.text()
 
 
 def test_opposite_directions_are_two_relations_and_exact_repeats_are_reported(tmp_path, model):
@@ -146,10 +148,34 @@ def test_import_without_category_uses_catalog_classification(tmp_path, model):
                    encoding="utf-8-sig")
     apply_tables(model, read_tables([sec]))
     assert model.category(model.section_by_code("01 57 19").category_id).name == "Auxiliar / apoyo"
-    assert model.section_by_code("4.28.33").category_id == model.default_category().id
+    clause = model.section_by_code("4.28.33")   # numeración de cláusula: nodo cláusula, no «Otra»
+    assert clause.is_clause and model.category(clause.category_id).name == "Cláusula"
 
 
 def test_existing_section_without_title_gets_title_from_entry(model):
     model.add_section("03 30 00")
     sec, created = model.get_or_create_section("03 30 00 - Concreto")
     assert not created and sec.title == "Concreto"
+
+
+def test_clause_row_ignores_status_progress_and_responsibles(tmp_path, model):
+    if not model.clauses.available:
+        import pytest
+
+        pytest.skip("catálogo de cláusulas no disponible")
+    sec, _rel = write_template_csv(tmp_path)
+    sec.write_text("Número;Descripción;Categoría;Color;Estatus;Avance;Responsables;Observaciones\n"
+                   "4.28.61;;;;Suspendida;50;INIA;Nota de la cláusula\n"
+                   "4.28.99.1;Texto libre de cláusula;Cláusula;;;;;\n",
+                   encoding="utf-8-sig")
+    summary = apply_tables(model, read_tables([sec]))
+    assert summary.sections_created == 2 and summary.statuses_created == 0 and summary.responsibles_created == 0
+    assert any("es una cláusula; se ignoran Estatus, Avance, Responsables" in e for e in summary.errors)
+    c = model.section_by_code("4.28.61")
+    assert c.is_clause and c.title == "PAGO FINAL" and c.notes == "Nota de la cláusula" and c.status_id is None
+    free = model.section_by_code("4.28.99.1")
+    assert free.is_clause and free.title == "Texto libre de cláusula"   # Categoría «Cláusula» sin catálogo
+    out = tmp_path / "tablas.xlsx"
+    export_tables_xlsx(model, out)
+    rows = {r["code"]: r for r in read_tables([out]).sections}
+    assert rows["4.28.61"]["category"] == "Cláusula" and rows["4.28.61"]["progress"] == ""

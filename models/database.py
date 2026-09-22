@@ -171,6 +171,9 @@ class ProjectDatabase:
         for version in range(current + 1, SCHEMA_VERSION + 1):
             with self.transaction():
                 for statement in MIGRATIONS.get(version, []):
+                    if callable(statement):
+                        statement(self.conn)
+                        continue
                     try:
                         self.conn.execute(statement)
                     except sqlite3.OperationalError as exc:

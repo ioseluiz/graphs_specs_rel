@@ -50,7 +50,7 @@ class AnalysisController(QObject):
         g = self.project.graph
         orphans = g.orphans()
         comps = g.components()
-        sections = self.project.sections()
+        sections = [s for s in self.project.sections() if not s.is_clause]  # las cláusulas no tienen avance
         avg = (sum(s.progress for s in sections) / len(sections)) if sections else None
         self.panel.set_metrics(g.node_count, g.edge_count, len(orphans), len(comps), avg)
         rows = []

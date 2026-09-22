@@ -48,7 +48,7 @@ def test_report_has_expected_sheets_and_summary(tmp_path, model):
     ws = wb[SHEET_SUMMARY]
     assert "CC-25-01" in ws["A1"].value and "Proyecto de prueba" in ws["A1"].value
     assert str(datetime.now().year) in ws["A2"].value
-    labels = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value for r in range(6, 13)}
+    labels = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value for r in range(6, 14)}
     assert labels["Secciones"] == 5 and labels["Relaciones"] == 4
     assert labels["Avance promedio"] == 42 and labels["Secciones al 100 %"] == 1
     assert labels["Secciones sin responsable"] == 2
@@ -114,3 +114,24 @@ def test_empty_project_report(tmp_path, model):
     assert stats.sections == 0 and stats.avg_progress == 0
     wb = load_workbook(out)
     assert wb[SHEET_SECTIONS].max_row == 1
+
+
+def test_clauses_are_excluded_from_progress_and_responsible_sheets(tmp_path, model):
+    from openpyxl import load_workbook
+
+    a = model.add_section("03 30 00", "Concreto")
+    model.set_section_progress(a.id, 40)
+    c = model.add_section("4.28.61", "PAGO FINAL", kind="clause")
+    model.add_relation(a.id, UiKind.REFERENCES, c.id)
+    out = tmp_path / "r.xlsx"
+    stats = export_report_xlsx(model, out)
+    assert stats.sections == 2 and stats.avg_progress == 40.0 and stats.without_responsible == 1
+    wb = load_workbook(out)
+    ws = wb[SHEET_SECTIONS]
+    rows = {ws.cell(row=r, column=2).value: [ws.cell(row=r, column=col).value for col in range(1, 8)]
+            for r in range(2, ws.max_row + 1)}
+    assert rows["4.28.61"][3] == "Cláusula" and rows["4.28.61"][4] in ("", None) and rows["4.28.61"][5] is None
+    assert rows["03 30 00"][5] == 40
+    by_resp = wb[SHEET_BY_RESP]
+    codes = [by_resp.cell(row=r, column=3).value for r in range(2, by_resp.max_row + 1)]
+    assert "03 30 00" in codes and "4.28.61" not in codes

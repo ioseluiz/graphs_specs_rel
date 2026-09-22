@@ -16,8 +16,14 @@ líneas del fondo. Vea *Mapa de referencias*.
 ## Escribí una sección y no se creó
 
 Los campos Sección A y B solo aceptan secciones elegidas de la lista, para evitar errores de tipeo. Escriba
-parte del número o del título y elija una opción. Si la sección no es MasterFormat (por ejemplo `4.28.33`),
-use **Sección personalizada…**.
+parte del número o del título y elija una opción. Las cláusulas del pliego (`4.28.33`) también están en la
+lista. Para un código que no sea MasterFormat ni cláusula use **Sección personalizada…**.
+
+## ¿Por qué una cláusula no tiene estatus, avance ni responsables?
+
+Las cláusulas del pliego no se redactan como las secciones: solo se conectan con las secciones que las citan
+y muestran su etiqueta. Por eso el nodo es rosado y redondeado, esas celdas están vacías en la pestaña
+*Secciones*, y no entran en los promedios de avance. Vea *Cláusulas del pliego*.
 
 ## ¿Cómo invierto una relación o cambio su tipo? Elegí «Es referenciada por» y la fila volvió a decir «Hace referencia a»
 
@@ -50,7 +56,8 @@ agregar las filas a ese proyecto o crear uno nuevo.
 
 Es intencional: la aplicación no mueve sus nodos ni impide cruces. Para corregir un trazado, arrastre los
 nodos, agregue puntos de quiebre con doble clic sobre la flecha o fije el puerto de salida/entrada desde el
-clic derecho.
+clic derecho. Los cruces se marcan con un pequeño salto (arco) en el tramo horizontal, que puede apagarse en
+*Ver → Saltos en cruces de flechas*.
 
 ## El archivo está bloqueado o «posiblemente OneDrive»
 

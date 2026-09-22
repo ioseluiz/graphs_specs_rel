@@ -5,7 +5,7 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 
 from config import palette
 from models.project_model import ProjectModel
-from models.relation_normalizer import search_key
+from models.relation_normalizer import search_key, sort_key
 
 COL_CODE, COL_TITLE, COL_CATEGORY, COL_STATUS, COL_PROGRESS, COL_RESP, COL_OBS = range(7)
 HEADERS = ["Número", "Descripción", "Categoría", "Estatus", "Avance", "Responsables", "Observaciones"]
@@ -45,8 +45,8 @@ class SectionsTableModel(QAbstractTableModel):
             self.dataChanged.emit(self.index(0, 0), self.index(len(self._ids) - 1, COL_OBS))
 
     def _on_added(self, sid: int) -> None:
-        keys = [self.project.section(i).code_key for i in self._ids]
-        key = self.project.section(sid).code_key
+        keys = [sort_key(self.project.section(i).code_key) for i in self._ids]
+        key = sort_key(self.project.section(sid).code_key)
         row = sum(1 for k in keys if k < key)
         self.beginInsertRows(QModelIndex(), row, row)
         self._ids.insert(row, sid)
@@ -86,7 +86,12 @@ class SectionsTableModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        if index.column() in (COL_TITLE, COL_CATEGORY, COL_STATUS, COL_PROGRESS, COL_RESP, COL_OBS):
+        editable = (COL_TITLE, COL_CATEGORY, COL_STATUS, COL_PROGRESS, COL_RESP, COL_OBS)
+        if index.isValid() and 0 <= index.row() < len(self._ids):
+            sec = self.project.section(self._ids[index.row()])
+            if sec is not None and sec.is_clause:
+                editable = (COL_TITLE, COL_OBS)   # cláusula: categoría fija, sin estatus/avance/responsables
+        if index.column() in editable:
             return base | Qt.ItemFlag.ItemIsEditable
         return base
 
@@ -103,12 +108,14 @@ class SectionsTableModel(QAbstractTableModel):
         if role == ROLE_SEARCH:
             resp = " ".join(r.code for r in self.project.section_responsibles(sid))
             st = self.project.status(sec.status_id)
-            return search_key(f"{sec.code_key} {sec.code} {sec.title} {resp} {st.name if st else ''} {sec.notes or ''}")
+            kind = "clausula" if sec.is_clause else ""
+            return search_key(f"{sec.code_key} {sec.code} {sec.title} {resp} {st.name if st else ''} "
+                              f"{sec.notes or ''} {kind}")
         if col == COL_CODE:
             if role == Qt.ItemDataRole.DisplayRole:
                 return sec.code
             if role == ROLE_SORT:
-                return sec.code_key
+                return sort_key(sec.code_key)
             if role in (ROLE_COLOR, ROLE_BORDER):
                 fill, border = self.project.section_colors(sec)
                 return fill if role == ROLE_COLOR else border
@@ -136,6 +143,8 @@ class SectionsTableModel(QAbstractTableModel):
             if role == ROLE_BORDER:
                 return palette.BORDER_STRONG
         elif col == COL_PROGRESS:
+            if sec.is_clause:
+                return "" if role == Qt.ItemDataRole.DisplayRole else (-1 if role == ROLE_SORT else None)
             if role == Qt.ItemDataRole.DisplayRole:
                 return f"{sec.progress} %"
             if role in (Qt.ItemDataRole.EditRole, ROLE_SORT):

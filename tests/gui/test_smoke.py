@@ -18,7 +18,7 @@ from views.main_window import MainWindow
 
 
 @pytest.fixture
-def app(qtbot, monkeypatch, master):
+def app(qtbot, monkeypatch, master, clauses):
     # QMessageBox modales: responder "Sí" automáticamente.
     from PyQt6.QtWidgets import QMessageBox
 
@@ -26,10 +26,10 @@ def app(qtbot, monkeypatch, master):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
-    project = ProjectModel(master=master)
+    project = ProjectModel(master=master, clauses=clauses)
     table_model = RelationsTableModel(project)
     completer_model = SectionCompleterModel()
-    window = MainWindow(table_model, completer_model, MasterFormatTreeModel(master))
+    window = MainWindow(table_model, completer_model, MasterFormatTreeModel(master, clauses=clauses))
     controller = MainController(project, window, table_model, completer_model)
     qtbot.addWidget(window)
     project.new_project(None, "CC-25-01", "Demo")
@@ -530,3 +530,95 @@ def test_picker_defers_filtering_while_typing(app, qtbot):
     qtbot.waitUntil(lambda: picker._proxy.rowCount() < total, timeout=3000)
     assert picker.match_count() > 0
     picker.flush_filter()
+
+
+def test_clause_dropped_from_catalog_is_pink_rounded_and_has_no_extras(app, qtbot):
+    from PyQt6.QtCore import QPointF, Qt
+
+    from models.masterformat_tree_model import ROLE_CODE_KEY, ROLE_IN_PROJECT, ROLE_SOURCE
+
+    project, window, controller, _t = app
+    if not project.clauses.available:
+        pytest.skip("catálogo de cláusulas no disponible")
+    tree = window.catalog_tree_model
+    group = tree.clause_group_index
+    assert group.isValid() and group.data() == "Cláusulas 4.28"
+    assert not (tree.flags(group) & Qt.ItemFlag.ItemIsDragEnabled)
+    assert tree.rowCount(group) == 99
+    first = tree.index(0, 0, group)
+    assert first.data(ROLE_SOURCE) == "clause" and first.data(ROLE_CODE_KEY) == "4.28.1"
+    assert tree.rowCount(tree.index_for_key("4.28.3")) == 11   # subcláusulas anidadas (4.28.3.1 … 4.28.3.11)
+
+    window.view.sectionsDropped.emit(["4.28.61"], QPointF(300.0, 200.0))
+    clause = project.section_by_code("4.28.61")
+    assert clause is not None and clause.is_clause and clause.status_id is None
+    node = window.scene.nodes[clause.id]
+    assert node.is_clause and node.fill.name().upper() == "#F8CBF0"
+    before = node.boundingRect()
+    window.act_show_extras.setChecked(not window.act_show_extras.isChecked())
+    assert window.scene.nodes[clause.id].boundingRect() == before
+    controller.canvas.refresh_keys_later.flush() if hasattr(controller.canvas, "refresh_keys_later") else None
+    controller.catalog.refresh_keys_later.flush()
+    assert tree.index_for_key("4.28.61").data(ROLE_IN_PROJECT) is True
+
+    menu = controller.canvas._build_node_menu(clause.id)
+    texts = [a.text() for a in menu.actions()]
+    assert not any(t.startswith(("Estatus", "Responsables", "Avance", "Categoría")) for t in texts)
+    assert any("Eliminar cláusula" in t for t in texts)
+    section = project.add_section("03 30 00", "Concreto")
+    texts2 = [a.text() for a in controller.canvas._build_node_menu(section.id).actions()]
+    assert any(t.startswith("Estatus") for t in texts2)
+
+
+def test_picker_finds_clauses_by_dotted_query(app):
+    project, window, controller, _t = app
+    if not project.clauses.available:
+        pytest.skip("catálogo de cláusulas no disponible")
+    picker = window.entry.picker_a
+    picker.setText("4.28.3")
+    proxy = picker._proxy
+    from models.section_completer_model import ROLE_CODE_KEY
+
+    keys = [proxy.index(r, 0).data(ROLE_CODE_KEY) for r in range(proxy.rowCount())]
+    assert "4.28.3" in keys and "4.28.3.1" in keys
+    assert picker._try_exact_match()
+    assert picker.value() == ("catalog", "4.28.3")
+
+
+def test_line_jumps_drawn_on_horizontal_segment_and_toggle(app, tmp_path, qtbot):
+    from PyQt6.QtCore import QSettings
+
+    project, window, controller, _t = app
+    window.act_line_jumps.setChecked(True)
+    _add(window, "A", UiKind.REFERENCES, "B")
+    _add(window, "C", UiKind.REFERENCES, "D")
+    ids = {code: project.section_by_code(code).id for code in "ABCD"}
+    project.move_nodes({ids["A"]: (-500.0, 0.0), ids["B"]: (500.0, 0.0), ids["C"]: (0.0, -300.0), ids["D"]: (0.0, 300.0)},
+                       pinned=True)
+    ab = next(r for r in project.relations() if r.source_id == ids["A"])
+    cd = next(r for r in project.relations() if r.source_id == ids["C"])
+    h, v = window.scene.edges[ab.id], window.scene.edges[cd.id]
+    h.set_forced_port("right", "left")
+    v.set_forced_port("bottom", "top")
+    n_points = len(h.points)
+    window.scene.refresh_jumps()
+    assert len(h.jumps) == 1 and v.jumps == []
+    assert abs(h.jumps[0].x - window.scene.nodes[ids["C"]].scene_rect().center().x()) < 1
+    assert len(h.points) == n_points                       # la polilínea lógica no lleva vértices de arco
+    assert h.shape() is h.shape() and h._render_path.elementCount() > h.path().elementCount()
+    render_png(window.scene, tmp_path / "saltos.png", scale=1.0)
+    render_svg(window.scene, tmp_path / "saltos.svg")
+    assert (tmp_path / "saltos.png").exists()
+    assert "C" in (tmp_path / "saltos.svg").read_text(encoding="utf-8")   # el arco se serializa como curvas en el SVG
+    # Desactivar limpia los arcos y se recuerda.
+    window.act_line_jumps.setChecked(False)
+    assert h.jumps == [] and QSettings().value("canvas/line_jumps", type=bool) is False
+    window.act_line_jumps.setChecked(True)
+    assert len(h.jumps) == 1
+    # Mover la vertical fuera del cruce: al soltar (nodesMoved) ya no hay salto.
+    node_c, node_d = window.scene.nodes[ids["C"]], window.scene.nodes[ids["D"]]
+    node_c.setPos(900.0, -300.0)
+    node_d.setPos(900.0, 300.0)
+    window.scene._jumps_later.flush()
+    assert h.jumps == []
+    QSettings().setValue("canvas/line_jumps", True)

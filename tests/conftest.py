@@ -34,9 +34,16 @@ def master():
     return MasterCatalog()
 
 
+@pytest.fixture(scope="session")
+def clauses():
+    from models.clause_catalog import ClauseCatalog
+
+    return ClauseCatalog()
+
+
 @pytest.fixture
-def model(qcore_app, master):
-    m = ProjectModel(master=master)
+def model(qcore_app, master, clauses):
+    m = ProjectModel(master=master, clauses=clauses)
     m.new_project(None, "CC-25-01", "Proyecto de prueba")
     yield m
     m.close()

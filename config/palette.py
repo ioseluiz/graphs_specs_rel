@@ -49,8 +49,10 @@ DEFAULT_CATEGORIES: tuple[CategorySeed, ...] = (
     CategorySeed("Técnica / constructiva", "#E2EFDA", "#70AD47"),
     CategorySeed("Contractual", "#FFF2CC", "#BF9000"),
     CategorySeed("Auxiliar / apoyo", "#DDEBF7", "#5B9BD5"),
-    CategorySeed("Otra", "#F8CBF0", "#C55A9E", is_default=True),
+    CategorySeed("Otra", "#EDEDED", "#8C8C8C", is_default=True),
+    CategorySeed("Cláusula", "#F8CBF0", "#C55A9E"),   # cláusulas del pliego (nodo sin estatus ni avance)
 )
+CLAUSE_CATEGORY_NAME = "Cláusula"
 
 
 @dataclass(frozen=True)

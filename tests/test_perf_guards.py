@@ -50,7 +50,9 @@ def test_text_query_is_fast_and_keeps_project_first(completer):
     first_catalog = kinds.index("catalog") if "catalog" in kinds else len(kinds)
     assert all(k == "section" for k in kinds[:first_catalog])     # y todas las del proyecto antes del catálogo
     keys = _rows(proxy, ROLE_CODE_KEY)[first_catalog:]
-    assert keys == sorted(keys)                                   # el catálogo conserva el orden por clave
+    from models.relation_normalizer import sort_key
+
+    assert keys == sorted(keys, key=sort_key)                     # el catálogo conserva el orden natural por clave
     for row in range(proxy.rowCount()):
         assert "conc" in source.entry(proxy.mapToSource(proxy.index(row, 0)).row()).search
 
@@ -262,3 +264,20 @@ def test_edge_geometry_cached_and_scene_growth(qtbot):
     assert edge.boundingRect() != before        # el movimiento recalculó la geometría cacheada
     assert scene.sceneRect().contains(scene.nodes[2].sceneBoundingRect())
     assert scene.sceneRect().width() > rect_before.width()
+
+
+def test_find_jumps_is_fast_on_a_dense_grid():
+    """30 flechas horizontales × 30 verticales = 900 cruces: el cálculo debe ser instantáneo (se repite al arrastrar)."""
+    import time
+
+    from views.components.canvas.line_jumps import find_jumps
+
+    polys = {}
+    for i in range(30):
+        polys[i] = [(0.0, i * 40.0), (2000.0, i * 40.0)]
+        polys[100 + i] = [(50.0 + i * 60.0, -100.0), (50.0 + i * 60.0, 2000.0)]
+    t0 = time.perf_counter()
+    result = find_jumps(polys)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    assert sum(len(v) for v in result.values()) == 900
+    assert elapsed_ms < 50, f"find_jumps tardó {elapsed_ms:.0f} ms"

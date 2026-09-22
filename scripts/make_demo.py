@@ -22,10 +22,10 @@ SECTIONS = [
     ("01 35 29", "Req. de Seguridad", "Auxiliar / apoyo", 560, 160),
     ("01 57 20", "Protección ambiental", "Auxiliar / apoyo", 700, 100),
     ("01 31 19", "Conferencia inicial", "Contractual", 820, 220),
-    ("4.28.33", "Sitio de obra", "Otra", 1000, 40),
-    ("4.28.59", "Pago Contratista", "Otra", 1060, 260),
+    ("4.28.33", "Sitio de obra", "Cláusula", 1000, 40),
+    ("4.28.59", "Pago Contratista", "Cláusula", 1060, 260),
     ("01 13 00", "Requisito de Contrato", "Contractual", 860, 420),
-    ("4.28.48", "Cant. estimada", "Otra", 1080, 460),
+    ("4.28.48", "Cant. estimada", "Cláusula", 1080, 460),
     ("31 23 00", "Excavación", "Técnica / constructiva", 1260, 240),
     ("03 30 53", "Concreto Vac. sitio", "Técnica / constructiva", 1300, 100),
     ("32 11 24", "Capabase agregado", "Técnica / constructiva", 1560, 160),
@@ -63,7 +63,8 @@ def build(path: Path | None) -> ProjectModel:
     model.new_project(path, "CC-25-01", "Proyecto de demostración")
     cats = {c.name: c.id for c in model.categories()}
     for code, title, cat, x, y in SECTIONS:
-        model.add_section(code, title, cats.get(cat), (float(x), float(y)))
+        kind = "clause" if cat == "Cláusula" else "section"   # cláusulas del pliego: nodo rosado sin avance
+        model.add_section(code, title, cats.get(cat), (float(x), float(y)), kind=kind)
     model.move_nodes({s.id: (model.position(s.id).x, model.position(s.id).y) for s in model.sections()},
                      pinned=True)
     for a, kind, b in RELATIONS:

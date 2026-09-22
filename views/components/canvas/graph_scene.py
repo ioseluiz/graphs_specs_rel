@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
 
 from config import palette
 from models.entities import RelationKind, Side
+from utils.debounce import Debouncer
+from views.components.canvas.line_jumps import find_jumps
 from views.components.canvas.relation_edge_item import RelationEdgeItem
 from views.components.canvas.section_node_item import SectionNodeItem
 
@@ -29,6 +31,9 @@ class GraphScene(QGraphicsScene):
         self.snap_enabled = False
         self.grid_visible = True
         self.show_extras = True   # responsables y avance en los nodos
+        self.line_jumps_enabled = True   # arco del tramo horizontal sobre las flechas verticales que cruza
+        # Un recálculo de cruces por ráfaga de cambios (arrastre de nodos/waypoints), no uno por píxel.
+        self._jumps_later = Debouncer(self.refresh_jumps, 40, self)
         self._press_positions: dict[int, QPointF] = {}
         self.setBackgroundBrush(QColor(palette.CANVAS_BACKGROUND))
         self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.BspTreeIndex)
@@ -47,8 +52,8 @@ class GraphScene(QGraphicsScene):
 
     # ------------------------------------------------------------------ nodos
     def add_node(self, section_id: int, code: str, title: str, fill: str, border: str,
-                 x: float, y: float) -> SectionNodeItem:
-        node = SectionNodeItem(section_id, code, title, fill, border)
+                 x: float, y: float, kind: str = "section") -> SectionNodeItem:
+        node = SectionNodeItem(section_id, code, title, fill, border, kind)
         node.set_show_extras(self.show_extras)
         node.setPos(x, y)
         self.addItem(node)
@@ -56,10 +61,11 @@ class GraphScene(QGraphicsScene):
         self.grow_scene_rect_to(node.sceneBoundingRect())  # O(1): no recorre toda la escena por nodo
         return node
 
-    def update_node(self, section_id: int, code: str, title: str, fill: str, border: str) -> None:
+    def update_node(self, section_id: int, code: str, title: str, fill: str, border: str,
+                    kind: str | None = None) -> None:
         node = self.nodes.get(section_id)
         if node is not None:
-            node.set_data(code, title, fill, border)
+            node.set_data(code, title, fill, border, kind)
 
     def set_node_extras(self, section_id: int, status_name: str, status_color: str | None, progress: int,
                         responsibles: list[tuple[str, str]]) -> None:
@@ -99,6 +105,7 @@ class GraphScene(QGraphicsScene):
         edge = RelationEdgeItem(relation_id, src, tgt, kind, waypoints, source_port, target_port)
         self.addItem(edge)
         self.edges[relation_id] = edge
+        self.schedule_jumps()
         return edge
 
     def update_edge(self, relation_id: int, source_id: int, target_id: int, kind: RelationKind,
@@ -116,6 +123,7 @@ class GraphScene(QGraphicsScene):
             edge.rebind(src, tgt)
         edge.kind = kind
         edge.set_geometry(waypoints, source_port, target_port)
+        self.schedule_jumps()
 
     def remove_edge(self, relation_id: int) -> None:
         edge = self.edges.pop(relation_id, None)
@@ -123,8 +131,10 @@ class GraphScene(QGraphicsScene):
             return
         edge.detach()
         self.removeItem(edge)
+        self.schedule_jumps()
 
     def clear_all(self) -> None:
+        self._jumps_later.cancel()
         for rid in list(self.edges):
             self.remove_edge(rid)
         for sid in list(self.nodes):
@@ -132,6 +142,30 @@ class GraphScene(QGraphicsScene):
         self.clear()
         self.nodes.clear()
         self.edges.clear()
+        self._jumps_later.cancel()
+
+    # ------------------------------------------------------------------ saltos en cruces de flechas
+    def schedule_jumps(self) -> None:
+        if self.line_jumps_enabled:
+            self._jumps_later.schedule()
+
+    def refresh_jumps(self) -> None:
+        """Recalcula los cruces de todas las flechas; solo repinta las que cambian."""
+        if not self.edges:
+            return
+        if not self.line_jumps_enabled:
+            for edge in self.edges.values():
+                edge.set_jumps([])
+            return
+        polylines = {rid: [(p.x(), p.y()) for p in edge.points] for rid, edge in self.edges.items()}
+        result = find_jumps(polylines)
+        for rid, edge in self.edges.items():
+            edge.set_jumps(result.get(rid, []))
+
+    def set_line_jumps(self, on: bool) -> None:
+        self.line_jumps_enabled = on
+        self._jumps_later.cancel()
+        self.refresh_jumps()
 
     # ------------------------------------------------------------------ resaltado
     def apply_highlight(self, node_ids: set[int], edge_ids: set[int], focus_id: int | None = None) -> None:
@@ -213,6 +247,7 @@ class GraphScene(QGraphicsScene):
         self._press_positions = {}
         if moved:
             self.grow_scene_rect()
+            self._jumps_later.flush()   # al soltar, los cruces quedan correctos de inmediato
             self.nodesMoved.emit(moved)
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:

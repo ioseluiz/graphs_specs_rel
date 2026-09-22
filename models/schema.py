@@ -1,7 +1,11 @@
 """DDL del archivo de proyecto (.specrel) y versionado de esquema."""
 from __future__ import annotations
 
-SCHEMA_VERSION = 4
+import re
+import sqlite3
+from typing import Callable
+
+SCHEMA_VERSION = 5
 
 HEX_COLOR_CHECK = "GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'"
 
@@ -37,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sections (
     border_color TEXT CHECK (border_color IS NULL OR border_color {HEX_COLOR_CHECK}),
     status_id    INTEGER REFERENCES statuses(id) ON DELETE SET NULL,
     progress     INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    kind         TEXT NOT NULL DEFAULT 'section' CHECK (kind IN ('section', 'clause')),
     CHECK (length(trim(code)) > 0)
 );
 
@@ -107,8 +112,64 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 """
 
-# Migraciones lineales: {versión_destino: [sentencias SQL]}
-MIGRATIONS: dict[int, list[str]] = {
+# Cláusulas del pliego según la numeración del cliente (por si el catálogo empaquetado no está disponible).
+_CLAUSE_FALLBACK = re.compile(r"^4\.28\.\d+(?:\.\d+)?$")
+CLAUSE_CATEGORY = ("Cláusula", "#F8CBF0", "#C55A9E")
+OLD_OTHER_COLORS = ("#F8CBF0", "#C55A9E")     # «Otra» tenía el rosado hasta el esquema v4
+NEW_OTHER_COLORS = ("#EDEDED", "#8C8C8C")
+
+
+def _bundled_clause_keys() -> set[str]:
+    try:
+        from config.settings import CLAUSE_CATALOG_PATH
+
+        if not CLAUSE_CATALOG_PATH.exists():
+            return set()
+        conn = sqlite3.connect(f"file:{CLAUSE_CATALOG_PATH.as_posix()}?mode=ro", uri=True)
+        try:
+            return {row[0] for row in conn.execute("SELECT code_key FROM clauses")}
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - la migración no debe fallar por el catálogo
+        return set()
+
+
+def migrate_v5_keys_and_clauses(conn: sqlite3.Connection) -> None:
+    """v5: claves con puntos para numeraciones de cláusula y tipo de nodo 'clause'.
+
+    1. Recalcula `code_key` en `sections` y `catalog` con la regla nueva ('4.28.3.1' != '4.28.31').
+    2. Las secciones que son cláusulas (en el catálogo empaquetado o con numeración 4.28.N[.M]) pasan a
+       kind='clause': categoría «Cláusula», sin estatus, avance 0 y sin responsables.
+    3. «Otra» deja el rosado (ahora de las cláusulas) y pasa a gris, si aún tenía los colores semilla.
+    """
+    from models.relation_normalizer import code_key
+
+    for table in ("sections", "catalog"):
+        for rowid, code, old in conn.execute(f"SELECT rowid, code, code_key FROM {table}").fetchall():
+            new = code_key(code)
+            if new != old:
+                conn.execute(f"UPDATE {table} SET code_key = ? WHERE rowid = ?", (new, rowid))
+    keys = _bundled_clause_keys()
+    ids = [row[0] for row in conn.execute("SELECT id, code, code_key FROM sections").fetchall()
+           if row[2] in keys or _CLAUSE_FALLBACK.fullmatch(str(row[1]).strip())]
+    if ids:
+        name, fill, border = CLAUSE_CATEGORY
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (name, fill_color, border_color, sort_order, is_default) "
+            "VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM categories), 0)", (name, fill, border))
+        cat_id = conn.execute("SELECT id FROM categories WHERE name = ? COLLATE NOCASE", (name,)).fetchone()[0]
+        conn.executemany(
+            "UPDATE sections SET kind = 'clause', status_id = NULL, progress = 0, category_id = ? WHERE id = ?",
+            [(cat_id, i) for i in ids])
+        conn.executemany("DELETE FROM section_responsibles WHERE section_id = ?", [(i,) for i in ids])
+    conn.execute(
+        "UPDATE categories SET fill_color = ?, border_color = ? "
+        "WHERE name = 'Otra' COLLATE NOCASE AND fill_color = ? AND border_color = ?",
+        (*NEW_OTHER_COLORS, *OLD_OTHER_COLORS))
+
+
+# Migraciones lineales: {versión_destino: [sentencias SQL o funciones (conn) -> None]}
+MIGRATIONS: dict[int, list[str | Callable[[sqlite3.Connection], None]]] = {
     # v2: color personalizado opcional por sección (prevalece sobre el de la categoría)
     2: [
         "ALTER TABLE sections ADD COLUMN fill_color TEXT",
@@ -141,5 +202,10 @@ MIGRATIONS: dict[int, list[str]] = {
             SELECT target_id, source_id, 'ref', notes, created_at FROM relations WHERE kind = 'mutual'""",
         "UPDATE relations SET kind = 'ref' WHERE kind = 'mutual'",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_relations_directed ON relations (source_id, target_id)",
+    ],
+    # v5: nodos de tipo cláusula (sin estatus ni avance) y claves con puntos para su numeración.
+    5: [
+        "ALTER TABLE sections ADD COLUMN kind TEXT NOT NULL DEFAULT 'section' CHECK (kind IN ('section', 'clause'))",
+        migrate_v5_keys_and_clauses,
     ],
 }

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from PyQt6.QtCore import QAbstractListModel, QModelIndex, QSortFilterProxyModel, Qt
 
 from config import palette
-from models.relation_normalizer import code_key, search_key
+from models.relation_normalizer import code_key, search_key, sort_key
 
 ROLE_SECTION_ID = Qt.ItemDataRole.UserRole + 1
 ROLE_CODE = Qt.ItemDataRole.UserRole + 2
@@ -53,7 +53,7 @@ class SectionCompleterModel(QAbstractListModel):
 
     def set_entries(self, entries: list[CompleterEntry]) -> None:
         self.beginResetModel()
-        self._entries = sorted(entries, key=lambda e: (e.kind != "section", e.code_key))
+        self._entries = sorted(entries, key=lambda e: (e.kind != "section", sort_key(e.code_key)))
         self._by_key = {e.code_key: i for i, e in enumerate(self._entries)}
         self.endResetModel()
 
@@ -85,6 +85,12 @@ class SectionCompleterModel(QAbstractListModel):
             fill, border = colors.get((category or "").casefold(), neutral)
             entries.append(CompleterEntry("catalog", None, r.code, r.code_key, r.title, fill, border,
                                           search=r.search))
+        clause_colors = colors.get(palette.CLAUSE_CATEGORY_NAME.casefold(), neutral)
+        for c in getattr(project_model, "clauses", None).all() if getattr(project_model, "clauses", None) else []:
+            if c.code_key in present:
+                continue
+            entries.append(CompleterEntry("catalog", None, c.code, c.code_key, c.title, *clause_colors,
+                                          search=c.search))
         self.set_entries(entries)
 
     def entries(self) -> list[CompleterEntry]:
@@ -132,9 +138,14 @@ def build_query(text: str) -> tuple[list[str], str]:
     return ([] if only_digits else normalized.split()), (digits if only_digits else "")
 
 
+def compact_key(key: str) -> str:
+    """Clave comparable con una consulta numérica: '4.28.3.1' -> '42831'."""
+    return key.lower().replace(".", "")
+
+
 def matches_query(search: str, key: str, tokens: list[str], digits: str) -> bool:
     if digits:
-        k = key.lower()
+        k = compact_key(key)
         return k.startswith(digits) or digits in k
     return all(tok in search for tok in tokens)
 
@@ -181,9 +192,9 @@ class SectionFilterProxy(QSortFilterProxyModel):
         src = self.sourceModel()
         entries = getattr(src, "entries", None)
         if callable(entries):
-            return any(e.code_key.lower().startswith(digits) for e in entries())
+            return any(compact_key(e.code_key).startswith(digits) for e in entries())
         for row in range(src.rowCount()):
-            if (src.data(src.index(row, 0), ROLE_CODE_KEY) or "").lower().startswith(digits):
+            if compact_key(src.data(src.index(row, 0), ROLE_CODE_KEY) or "").startswith(digits):
                 return True
         return False
 
@@ -193,10 +204,10 @@ class SectionFilterProxy(QSortFilterProxyModel):
         src = self.sourceModel()
         entry = src.entry(source_row) if hasattr(src, "entry") else None
         if entry is not None:
-            key, haystack = entry.code_key.lower(), entry.search
+            key, haystack = compact_key(entry.code_key), entry.search
         else:
             idx = src.index(source_row, 0, source_parent)
-            key = (src.data(idx, ROLE_CODE_KEY) or "").lower()
+            key = compact_key(src.data(idx, ROLE_CODE_KEY) or "")
             haystack = src.data(idx, ROLE_SEARCH) or ""
         if self._digits:
             if self._prefix_only:

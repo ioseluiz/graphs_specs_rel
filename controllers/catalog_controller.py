@@ -8,6 +8,7 @@ from PyQt6.QtCore import QObject, QPointF, QSettings
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from config.settings import SETTINGS_LAST_DIR
+from models.clause_catalog import ClauseCatalog, ClauseCatalogError
 from models.master_catalog import MasterCatalogError
 from models.masterformat_tree_model import MasterFormatTreeModel
 from models.project_model import ProjectModel
@@ -43,6 +44,8 @@ class CatalogController(QObject):
         window.act_export_catalog.triggered.connect(self.export_catalog)
         window.act_add_catalog_entry.triggered.connect(lambda: self.add_entry(""))
         window.act_clear_catalog_edits.triggered.connect(self.clear_all_edits)
+        window.act_replace_clauses.triggered.connect(self.replace_clauses)
+        window.act_reset_clauses.triggered.connect(self.reset_clauses)
 
         # Coalescido: marcar en el árbol las secciones del proyecto una vez por ráfaga de cambios.
         self.refresh_keys_later = Debouncer(self._refresh_project_keys, 50, self)
@@ -70,11 +73,17 @@ class CatalogController(QObject):
         self.window.act_reset_catalog.setEnabled(master.is_user_copy)
         self.window.act_clear_category_overrides.setEnabled(master.override_count > 0)
         self.window.act_clear_catalog_edits.setEnabled(master.edit_count > 0)
+        clauses = self.project.clauses
+        self.window.act_reset_clauses.setEnabled(clauses.is_user_copy)
         title = "Secciones MasterFormat"
+        if clauses.available:
+            title += " y cláusulas"
         if master.is_user_copy:
             title += " (copia del usuario)"
         if master.edit_count:
             title += f" · {master.edit_count} edición(es)"
+        if clauses.is_user_copy:
+            title += " · cláusulas del usuario"
         self.panel.setWindowTitle(title)
 
     # ------------------------------------------------------------------ edición del catálogo
@@ -193,8 +202,9 @@ class CatalogController(QObject):
             entry.set_picker_section(which, section.id, section.label)
         cat = self.project.category(section.category_id)
         suffix = f" · {cat.name}" if cat else ""
+        noun = "Cláusula" if section.is_clause else "Sección"
         self.window.show_status(
-            f"Sección {section.label} {'agregada' if created else 'ya estaba en el proyecto'}{suffix}.", 6000)
+            f"{noun} {section.label} {'agregada' if created else 'ya estaba en el proyecto'}{suffix}.", 6000)
         return section.id
 
     def use_as(self, which: str, code_key: str) -> None:
@@ -204,7 +214,7 @@ class CatalogController(QObject):
             self.window.entry.set_picker_section(which, section_id, section.label if section else "")
 
     def center_on(self, code_key: str) -> None:
-        record = self.project.master.get(code_key)
+        record = self.project.master.get(code_key) or self.project.clauses.get(code_key)
         section = self.project.section_by_code(record.code) if record else None
         if section is not None:
             self.window.tabs.setCurrentIndex(TAB_MAP)
@@ -304,6 +314,44 @@ class CatalogController(QObject):
         self.project.master.reset_to_bundled()
         self._after_catalog_change()
         self.window.show_status("Catálogo MasterFormat restaurado.", 6000)
+
+    # ------------------------------------------------------------------ catálogo de cláusulas
+    def replace_clauses(self) -> None:
+        settings = QSettings()
+        start = settings.value(SETTINGS_LAST_DIR, "", type=str)
+        path, _ = QFileDialog.getOpenFileName(
+            self.window, "Reemplazar catálogo de cláusulas", start,
+            "Excel o CSV (*.xlsx *.xlsm *.csv);;Todos los archivos (*)")
+        if not path:
+            return
+        settings.setValue(SETTINGS_LAST_DIR, str(Path(path).parent))
+        run_with_progress(self.window, "Catálogo de cláusulas", "Leyendo el listado de cláusulas…",
+                          ClauseCatalog.build_user_catalog_file, Path(path),
+                          on_done=self._on_clauses_built, on_error=self._on_clauses_build_failed)
+
+    def _on_clauses_built(self, result: tuple[Path, int]) -> None:
+        target, count = result
+        try:
+            self.project.clauses.load(target)
+        except ClauseCatalogError as exc:
+            QMessageBox.critical(self.window, "Catálogo de cláusulas", str(exc))
+            return
+        self._after_catalog_change()
+        QMessageBox.information(self.window, "Catálogo de cláusulas",
+                                f"Catálogo de cláusulas reemplazado: {count} cláusulas y subcláusulas.\n"
+                                "Se guardó una copia en su perfil de usuario y se usará en todos los proyectos.")
+
+    def _on_clauses_build_failed(self, exc: BaseException, _tb: str) -> None:
+        QMessageBox.critical(self.window, "Catálogo de cláusulas", str(exc))
+
+    def reset_clauses(self) -> None:
+        answer = QMessageBox.question(self.window, "Restaurar cláusulas",
+                                      "¿Volver al catálogo de cláusulas incluido en la aplicación?")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.project.clauses.reset_to_bundled()
+        self._after_catalog_change()
+        self.window.show_status("Catálogo de cláusulas restaurado.", 6000)
 
     def _after_catalog_change(self) -> None:
         self.tree_model.reload()

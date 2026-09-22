@@ -73,12 +73,12 @@ def test_create_project_from_template_next_to_excel_and_arranged(app, tmp_path):
     assert dest.exists() and project.is_open and project.path == dest
     assert project.meta().code == "CC-26-01"           # hoja «Proyecto» de la plantilla
     assert window.stack.currentIndex() == 1
-    assert len(project.sections()) == 4 and table_model.rowCount() == 4
+    assert len(project.sections()) == 5 and table_model.rowCount() == 5
     positions = {(round(p.x), round(p.y)) for p in project.positions().values()}
-    assert len(positions) == 4                          # acomodo automático: posiciones distintas
+    assert len(positions) == 5                          # acomodo automático: posiciones distintas
     assert not any(p.pinned for p in project.positions().values())
     title, summary = controller.shown[-1]
-    assert title == "Mapa creado" and summary.relations_created == 4
+    assert title == "Mapa creado" and summary.relations_created == 5
     assert str(dest) in window.statusBar().currentMessage()
 
 
@@ -99,9 +99,9 @@ def test_existing_project_file_asks_and_can_open_it(app, tmp_path):
     first_path = project.path
     controller.answers = [0]                            # «Abrir el existente y agregar las tablas»
     controller.create_project_from_tables([xlsx])
-    assert project.path == first_path and table_model.rowCount() == 4
+    assert project.path == first_path and table_model.rowCount() == 5
     _title, summary = controller.shown[-1]
-    assert summary.relations_created == 0 and summary.relations_duplicated == 4
+    assert summary.relations_created == 0 and summary.relations_duplicated == 5
     controller.answers = [None]                         # cancelar: no pasa nada
     controller.create_project_from_tables([xlsx])
     assert project.path == first_path
@@ -113,7 +113,7 @@ def test_drop_tables_with_project_open_asks_add_or_new(app, tmp_path):
     xlsx = _template(tmp_path)
     controller.answers = [0]                            # agregar al proyecto abierto
     controller.open_dropped_files([str(xlsx)])
-    assert project.path is None and table_model.rowCount() == 4
+    assert project.path is None and table_model.rowCount() == 5
     controller.answers = [1]                            # crear un mapa nuevo
     controller.open_dropped_files([str(xlsx)])
     assert project.path == tmp_path / "CC-26-30 relaciones.specrel"

@@ -7,7 +7,8 @@ El color de cada nodo indica su **categoría**:
 | Técnica / constructiva | verde | Divisiones 03 a 49 y trabajos de campo |
 | Contractual | amarillo | División 00 y requisitos generales de contrato (01 10–01 33, 01 60, 01 70) |
 | Auxiliar / apoyo | azul | Seguridad, ambiente, calidad y controles temporales (01 35, 01 40–01 58), estudios (02 20–02 32), operación, schedules y commissioning |
-| Otra | rosa | Secciones fuera de MasterFormat sin clasificar |
+| Otra | gris | Secciones fuera de MasterFormat sin clasificar (categoría por defecto) |
+| Cláusula | rosa | Cláusulas y subcláusulas del pliego (`4.28.x`); categoría fija del nodo cláusula |
 
 ## Clasificación por defecto del catálogo
 

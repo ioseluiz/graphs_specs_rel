@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyleOptionGraphi
 
 from config import palette
 from models.entities import RelationKind, Side  # noqa: F401  (kind se conserva por compatibilidad)
+from views.components.canvas.line_jumps import Jump
 from views.components.canvas.orthogonal_router import (
     choose_ports,
     choose_ports_near,
@@ -54,6 +55,9 @@ class RelationEdgeItem(QGraphicsPathItem):
         self._dimmed = False
         self._highlight = False
         self.notes = ""
+        self.jumps: list[Jump] = []             # saltos (arcos) sobre flechas verticales que cruza; los fija la escena
+        self._render_path = QPainterPath()      # trazado pintado: la polilínea lógica + arcos de salto
+        self._bounds_margin = ARROW_LEN
         self._handles: list[WaypointHandleItem] = []
         self._shape = QPainterPath()
         self._bounds = QRectF()
@@ -121,14 +125,64 @@ class RelationEdgeItem(QGraphicsPathItem):
         stroker = QPainterPathStroker()
         stroker.setWidth(10)
         self._shape = stroker.createStroke(path)
-        self._bounds = self._shape.controlPointRect().adjusted(-ARROW_LEN, -ARROW_LEN, ARROW_LEN, ARROW_LEN)
+        m = self._bounds_margin
+        self._bounds = self._shape.controlPointRect().adjusted(-m, -m, m, m)
         self.setPath(path)
+        self._render_path = self._build_render_path()
         self._arrows = []
         if len(pts) >= 2:
             self._arrows.append(self._arrow_head(pts[-2], pts[-1]))
         for h in self._handles:
             if self.waypoints and h.index < len(self.waypoints) and not h._dragging:
                 h.setPos(self.waypoints[h.index])
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "schedule_jumps"):
+            scene.schedule_jumps()  # los cruces con otras flechas pudieron cambiar
+
+    # ------------------------------------------------------------------ saltos en cruces
+    def set_jumps(self, jumps: list[Jump]) -> None:
+        """Arcos que este trazado dibuja sobre flechas verticales que cruza (los calcula la escena)."""
+        if list(jumps) == self.jumps:
+            return
+        self.jumps = list(jumps)
+        margin = max(ARROW_LEN, max((j.r for j in self.jumps), default=0.0))
+        if margin != self._bounds_margin:
+            self.prepareGeometryChange()
+            self._bounds_margin = margin
+            self._bounds = self._shape.controlPointRect().adjusted(-margin, -margin, margin, margin)
+        self._render_path = self._build_render_path()
+        self.update()
+
+    def _build_render_path(self) -> QPainterPath:
+        """Polilínea lógica con un arco hacia arriba en cada salto válido del tramo horizontal.
+
+        Los saltos se validan contra los puntos actuales (durante un arrastre pueden estar desfasados hasta el
+        siguiente recálculo de la escena): un salto que ya no cae dentro de su tramo horizontal se omite.
+        """
+        pts = self.points
+        path = QPainterPath()
+        if not pts:
+            return path
+        path.moveTo(pts[0])
+        by_segment: dict[int, list[Jump]] = {}
+        for j in self.jumps:
+            by_segment.setdefault(j.segment, []).append(j)
+        for i in range(1, len(pts)):
+            a, b = pts[i - 1], pts[i]
+            jumps = by_segment.get(i - 1)
+            if not jumps or abs(b.y() - a.y()) > 1e-6:
+                path.lineTo(b)
+                continue
+            y = a.y()
+            d = 1.0 if b.x() > a.x() else -1.0
+            lo, hi = min(a.x(), b.x()), max(a.x(), b.x())
+            valid = [j for j in jumps if abs(j.y - y) < 0.5 and j.x - j.r >= lo + 1 and j.x + j.r <= hi - 1]
+            for j in sorted(valid, key=lambda j: j.x * d):
+                path.lineTo(QPointF(j.x - d * j.r, y))
+                rect = QRectF(j.x - j.r, y - j.r, 2 * j.r, 2 * j.r)
+                path.arcTo(rect, 180.0 if d > 0 else 0.0, -180.0 * d)   # siempre por arriba (y menor)
+            path.lineTo(b)
+        return path
 
     def set_notes(self, notes: str | None) -> None:
         self.notes = (notes or "").strip()
@@ -279,7 +333,7 @@ class RelationEdgeItem(QGraphicsPathItem):
             halo.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(halo)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(self.path())
+            painter.drawPath(self._render_path)
             for arrow in self._arrows:
                 painter.drawPolygon(arrow)
         pen = QPen(color, width)
@@ -287,7 +341,7 @@ class RelationEdgeItem(QGraphicsPathItem):
         pen.setCapStyle(Qt.PenCapStyle.FlatCap)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(self.path())
+        painter.drawPath(self._render_path)
         painter.setPen(QPen(color, 1))
         painter.setBrush(color)
         for arrow in self._arrows:

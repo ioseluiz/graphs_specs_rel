@@ -72,6 +72,10 @@ class CanvasController(QObject):
         window.act_show_extras.setChecked(show_extras)
         self.scene.show_extras = show_extras
         window.act_show_extras.toggled.connect(self._set_show_extras)
+        line_jumps = settings.value("canvas/line_jumps", True, type=bool)
+        window.act_line_jumps.setChecked(line_jumps)
+        self.scene.line_jumps_enabled = line_jumps
+        window.act_line_jumps.toggled.connect(self._set_line_jumps)
         window.act_arrange_new.triggered.connect(self.arrange_unpinned)
         window.act_add_section.triggered.connect(lambda: self.new_section(None))
         window.act_delete.triggered.connect(self.delete_selection)
@@ -87,6 +91,7 @@ class CanvasController(QObject):
                 self.scene.add_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
                                     rel.source_port, rel.target_port)
             self.scene.grow_scene_rect()
+            self.scene.refresh_jumps()
             self.view.fit_all()
 
     def _node_style(self, section: Section) -> tuple[str, str]:
@@ -101,12 +106,16 @@ class CanvasController(QObject):
         pos = self.project.position(section.id)
         x, y = (pos.x, pos.y) if pos else (0.0, 0.0)
         fill, border = self._node_style(section)
-        self.scene.add_node(section.id, section.code, section.title, fill, border, x, y)
+        self.scene.add_node(section.id, section.code, section.title, fill, border, x, y, section.kind)
         self.scene.set_node_extras(section.id, *self._node_extras(section))
 
     def _set_show_extras(self, on: bool) -> None:
         self.scene.set_show_extras(on)
         QSettings().setValue("canvas/show_extras", on)
+
+    def _set_line_jumps(self, on: bool) -> None:
+        self.scene.set_line_jumps(on)
+        QSettings().setValue("canvas/line_jumps", on)
 
     # ------------------------------------------------------------------ modelo -> escena
     def _on_section_added(self, section_id: int) -> None:
@@ -119,7 +128,7 @@ class CanvasController(QObject):
         section = self.project.section(section_id)
         if section is not None:
             fill, border = self._node_style(section)
-            self.scene.update_node(section_id, section.code, section.title, fill, border)
+            self.scene.update_node(section_id, section.code, section.title, fill, border, section.kind)
             self.scene.set_node_extras(section_id, *self._node_extras(section))
 
     def _refresh_all_nodes(self) -> None:
@@ -268,7 +277,8 @@ class CanvasController(QObject):
                                      fill_color=section.fill_color, border_color=section.border_color,
                                      statuses=self.project.statuses(), responsibles=self.project.responsibles(),
                                      status_id=section.status_id, progress=section.progress,
-                                     responsible_ids=self.project.section_responsible_ids(section_id))
+                                     responsible_ids=self.project.section_responsible_ids(section_id),
+                                     kind=section.kind)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         code, title, category_id, notes = dialog.values()
@@ -277,7 +287,8 @@ class CanvasController(QObject):
         try:
             self.project.update_section(section_id, code, title, category_id, notes, fill, border,
                                         status_id, progress)
-            self.project.set_section_responsibles(section_id, responsible_ids)
+            if not section.is_clause:
+                self.project.set_section_responsibles(section_id, responsible_ids)
         except ValueError as exc:
             QMessageBox.warning(self.window, "Sección", str(exc))
 
@@ -375,22 +386,33 @@ class CanvasController(QObject):
 
     # ------------------------------------------------------------------ menús contextuales
     def _node_menu(self, section_id: int, global_pos: QPoint) -> None:
+        menu = self._build_node_menu(section_id)
+        if menu is not None:
+            menu.exec(global_pos)
+
+    def _build_node_menu(self, section_id: int) -> QMenu | None:
+        """Menú contextual del nodo. Las cláusulas no tienen categoría, estatus, responsables ni avance."""
         section = self.project.section(section_id)
         if section is None:
-            return
+            return None
         menu = QMenu(self.window)
-        menu.addSection(f"{section.code} {section.title}".strip())
-        menu.addAction("Editar sección…", lambda: self.edit_section(section_id))
-        cat_menu = menu.addMenu("Categoría")
-        for cat in self.project.categories():
-            pix = QPixmap(14, 14)
-            pix.fill(QColor(cat.fill_color))
-            act = QAction(QIcon(pix), cat.name, menu)
-            act.setCheckable(True)
-            act.setChecked(cat.id == section.category_id)
-            act.triggered.connect(lambda _c=False, cid=cat.id: self.project.set_section_category(section_id, cid))
-            cat_menu.addAction(act)
-        color_menu = menu.addMenu("Color de la sección")
+        if section.is_clause:
+            menu.addSection(f"{section.code} · Cláusula")
+            menu.addAction("Editar cláusula…", lambda: self.edit_section(section_id))
+        else:
+            menu.addSection(f"{section.code} {section.title}".strip())
+            menu.addAction("Editar sección…", lambda: self.edit_section(section_id))
+            cat_menu = menu.addMenu("Categoría")
+            for cat in self.project.categories():
+                pix = QPixmap(14, 14)
+                pix.fill(QColor(cat.fill_color))
+                act = QAction(QIcon(pix), cat.name, menu)
+                act.setCheckable(True)
+                act.setChecked(cat.id == section.category_id)
+                act.triggered.connect(
+                    lambda _c=False, cid=cat.id: self.project.set_section_category(section_id, cid))
+                cat_menu.addAction(act)
+        color_menu = menu.addMenu("Color de la sección" if not section.is_clause else "Color de la cláusula")
         selected = self.scene.selected_node_ids()
         if len(selected) > 1 and section_id in selected:
             color_menu.addAction(f"Personalizar color de {len(selected)} seleccionadas…",
@@ -400,7 +422,21 @@ class CanvasController(QObject):
         act_reset_color = color_menu.addAction("Usar el color de la categoría",
                                                lambda: self.project.set_section_colors(section_id, None))
         act_reset_color.setEnabled(section.has_custom_color)
-        # Estatus / responsables / avance
+        if not section.is_clause:
+            self._add_extras_menus(menu, section)
+        menu.addSeparator()
+        menu.addAction("Crear relación desde aquí (arrastre con Alt)",
+                       lambda: self.window.act_connect.setChecked(True))
+        menu.addAction("Analizar impacto", lambda: self._analyze(section_id))
+        menu.addSeparator()
+        act_del = menu.addAction("Eliminar cláusula…" if section.is_clause else "Eliminar sección…",
+                                 lambda: self.delete_section(section_id))
+        act_del.setIcon(self.window.act_delete.icon())
+        return menu
+
+    def _add_extras_menus(self, menu: QMenu, section: Section) -> None:
+        """Submenús Estatus / Responsables / Avance (solo secciones)."""
+        section_id = section.id
         status_menu = menu.addMenu("Estatus")
         for st in self.project.statuses():
             pix = QPixmap(14, 14)
@@ -430,14 +466,6 @@ class CanvasController(QObject):
             act.triggered.connect(lambda _c=False, p=pct: self.project.set_section_progress(section_id, p))
         prog_menu.addSeparator()
         prog_menu.addAction("Otro…", lambda: self._ask_progress(section_id))
-        menu.addSeparator()
-        menu.addAction("Crear relación desde aquí (arrastre con Alt)",
-                       lambda: self.window.act_connect.setChecked(True))
-        menu.addAction("Analizar impacto", lambda: self._analyze(section_id))
-        menu.addSeparator()
-        act_del = menu.addAction("Eliminar sección…", lambda: self.delete_section(section_id))
-        act_del.setIcon(self.window.act_delete.icon())
-        menu.exec(global_pos)
 
     def _toggle_responsible(self, section_id: int, responsible_id: int, checked: bool) -> None:
         ids = self.project.section_responsible_ids(section_id)

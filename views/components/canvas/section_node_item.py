@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from views.components.canvas.relation_edge_item import RelationEdgeItem
 
 MIN_W, MAX_W, HEIGHT, CHAMFER = 150.0, 230.0, 58.0, 12.0
+CLAUSE_RADIUS = 10.0                              # cláusulas: rectángulo redondeado en vez de octágono
 PAD_X = 12.0
 RESP_D, RESP_GAP, RESP_MAX = 24.0, 4.0, 4        # círculos de responsables
 EXTRA_TOP = RESP_D + 8.0                          # espacio sobre el octágono
@@ -24,11 +25,13 @@ BAR_H, EXTRA_BOTTOM = 8.0, 26.0                   # barra de avance + texto de e
 class SectionNodeItem(QGraphicsItem):
     TYPE = QGraphicsItem.UserType + 1
 
-    def __init__(self, section_id: int, code: str, title: str, fill: str, border: str) -> None:
+    def __init__(self, section_id: int, code: str, title: str, fill: str, border: str,
+                 kind: str = "section") -> None:
         super().__init__()
         self.section_id = section_id
         self.code = code
         self.title = title
+        self.kind = kind
         self.fill = QColor(fill)
         self.border = QColor(border)
         self._edges: set[RelationEdgeItem] = set()
@@ -63,10 +66,21 @@ class SectionNodeItem(QGraphicsItem):
     def type(self) -> int:  # noqa: A003
         return self.TYPE
 
+    @property
+    def is_clause(self) -> bool:
+        return self.kind == "clause"
+
+    @property
+    def _extras_visible(self) -> bool:
+        """Las cláusulas nunca muestran estatus, avance ni responsables (F6 no las afecta)."""
+        return self._show_extras and not self.is_clause
+
     # ------------------------------------------------------------------ datos
-    def set_data(self, code: str, title: str, fill: str, border: str) -> None:
+    def set_data(self, code: str, title: str, fill: str, border: str, kind: str | None = None) -> None:
         self.prepareGeometryChange()
         self.code, self.title = code, title
+        if kind is not None:
+            self.kind = kind
         self.fill, self.border = QColor(fill), QColor(border)
         self._layout_text()
         self.update()
@@ -96,6 +110,9 @@ class SectionNodeItem(QGraphicsItem):
         return self._show_extras
 
     def _update_tooltip(self) -> None:
+        if self.is_clause:
+            self.setToolTip(f"{self.code}\n{self.title}\nCláusula del pliego".strip())
+            return
         lines = [f"{self.code}\n{self.title}".strip()]
         if self._status_name:
             lines.append(f"Estatus: {self._status_name}")
@@ -145,12 +162,20 @@ class SectionNodeItem(QGraphicsItem):
 
     def boundingRect(self) -> QRectF:
         r = self.rect().adjusted(-4, -4, 4, 4)
-        if self._show_extras:
+        if self._extras_visible:
             r = r.adjusted(0, -EXTRA_TOP, 0, EXTRA_BOTTOM)
         return r
 
     def shape(self) -> QPainterPath:
-        return self._octagon(self.rect())
+        return self._outline(self.rect())
+
+    def _outline(self, r: QRectF) -> QPainterPath:
+        """Contorno del nodo: rectángulo redondeado para cláusulas, octágono para secciones."""
+        if self.is_clause:
+            path = QPainterPath()
+            path.addRoundedRect(r, CLAUSE_RADIUS, CLAUSE_RADIUS)
+            return path
+        return self._octagon(r)
 
     @staticmethod
     def _octagon(r: QRectF) -> QPainterPath:
@@ -230,7 +255,7 @@ class SectionNodeItem(QGraphicsItem):
     # ------------------------------------------------------------------ pintura
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
         r = self.rect()
-        path = self._octagon(r)
+        path = self._outline(r)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         if self._hover and not self.isSelected():
@@ -267,7 +292,7 @@ class SectionNodeItem(QGraphicsItem):
             painter.drawText(QPointF(r.center().x() - fm_title.horizontalAdvance(line) / 2, y), line)
             y += fm_title.height()
 
-        if self._show_extras:
+        if self._extras_visible:
             self._paint_responsibles(painter, r)
             self._paint_progress(painter, r)
 

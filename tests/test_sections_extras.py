@@ -160,3 +160,47 @@ def test_node_extras_geometry(qcore_app):
     node.set_show_extras(False)
     assert node.boundingRect().height() < br.height()
     assert "INIO" in node.toolTip() and "70 %" in node.toolTip()
+
+
+def test_clause_node_has_no_extras_and_rounded_outline(qcore_app):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtWidgets import QApplication
+
+    if QApplication.instance() is None:
+        pytest.skip("requiere QApplication")
+    from views.components.canvas.section_node_item import SectionNodeItem
+
+    clause = SectionNodeItem(1, "4.28.61", "PAGO FINAL", "#F8CBF0", "#C55A9E", kind="clause")
+    section = SectionNodeItem(2, "03 30 00", "Concreto", "#E2EFDA", "#70AD47")
+    clause.set_extras("En elaboración", "#FFE699", 70, [("INIO", "#5B9BD5")], show=True)
+    base = clause.rect()
+    assert clause.is_clause and clause.boundingRect() == base.adjusted(-4, -4, 4, 4)
+    clause.set_show_extras(True)
+    assert clause.boundingRect() == base.adjusted(-4, -4, 4, 4)   # F6 no afecta a las cláusulas
+    corner = QPointF(base.left() + 1, base.top() + 1)
+    assert not clause.shape().contains(corner) and clause.shape().contains(QPointF(base.left() + 12, base.top() + 12))
+    assert not section.shape().contains(QPointF(section.rect().left() + 1, section.rect().top() + 1))
+    assert section.shape() != clause.shape()
+    assert "Avance" not in clause.toolTip() and "PAGO FINAL" in clause.toolTip() and "Cláusula" in clause.toolTip()
+    clause.set_data("4.28.61", "PAGO FINAL", "#E2EFDA", "#70AD47", kind="section")
+    assert not clause.is_clause and clause.boundingRect() != base.adjusted(-4, -4, 4, 4)
+
+
+def test_sections_table_disables_extras_for_clauses(model, qcore_app):
+    from PyQt6.QtCore import Qt
+
+    from models.sections_table_model import (
+        COL_CATEGORY, COL_OBS, COL_PROGRESS, COL_RESP, COL_STATUS, COL_TITLE, SectionsTableModel,
+    )
+
+    tm = SectionsTableModel(model)
+    c = model.add_section("4.28.61", "PAGO FINAL", kind="clause")
+    model.add_section("03 30 00", "Concreto")
+    row = next(r for r in range(tm.rowCount()) if tm.index(r, 0).data() == "4.28.61")
+    for col in (COL_CATEGORY, COL_STATUS, COL_PROGRESS, COL_RESP):
+        assert not (tm.flags(tm.index(row, col)) & Qt.ItemFlag.ItemIsEditable)
+    for col in (COL_TITLE, COL_OBS):
+        assert tm.flags(tm.index(row, col)) & Qt.ItemFlag.ItemIsEditable
+    assert tm.index(row, COL_PROGRESS).data() == "" and tm.index(row, COL_STATUS).data() == ""
+    assert tm.index(row, COL_CATEGORY).data() == "Cláusula"
+    assert c.is_clause

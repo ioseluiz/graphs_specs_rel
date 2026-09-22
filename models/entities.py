@@ -71,12 +71,17 @@ class Section:
     border_color: str | None = None
     status_id: int | None = None
     progress: int = 0                # 0..100
+    kind: str = "section"            # 'section' (MasterFormat) | 'clause' (cláusula del pliego: sin estatus/avance)
 
     @property
     def label(self) -> str:
         """'03 30 00 - Concreto' (o solo el código si no hay descripción)."""
         title = (self.title or "").strip()
         return f"{self.code} - {title}" if title else self.code
+
+    @property
+    def is_clause(self) -> bool:
+        return self.kind == "clause"
 
     @property
     def has_custom_color(self) -> bool:
@@ -142,6 +147,7 @@ class CatalogEntry:
     code: str
     title: str
     category_name: str | None = None
+    kind: str = "section"            # 'section' | 'clause'
 
 
 @dataclass

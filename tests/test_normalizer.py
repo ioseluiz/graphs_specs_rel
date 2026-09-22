@@ -19,8 +19,29 @@ def test_code_key_variants(raw):
 
 
 def test_code_key_with_letters_and_dots():
-    assert code_key("4.28.33") == "42833"
     assert code_key("01 35 13a") == "013513A"
+    assert code_key("01 35 13.13") == "01351313"
+    assert code_key("01.35.13.13") == "01351313"   # MasterFormat con puntos: se compacta
+
+
+def test_clause_codes_keep_dots():
+    assert code_key("4.28.33") == "4.28.33"
+    assert code_key(" 4.28.3.1 ") == "4.28.3.1"
+    assert code_key("4.28.3.1") != code_key("4.28.31")
+    assert code_key("4.28") == "428"   # dos segmentos no es numeración de cláusula
+
+
+def test_split_code_title_does_not_absorb_number_after_clause_code():
+    assert split_code_title("4.28.3.1 2 REQUISITOS") == ("4.28.3.1", "2 REQUISITOS")
+    assert split_code_title("4.28.61 50PAGO FINAL") == ("4.28.61", "50PAGO FINAL")
+    assert split_code_title("4.28.3.1 - Retención") == ("4.28.3.1", "Retención")
+
+
+def test_sort_key_natural_order():
+    from models.relation_normalizer import sort_key
+
+    keys = ["4.28.10", "4.28.2", "4.28.2.1", "312300", "4.28.1"]
+    assert sorted(keys, key=sort_key) == ["312300", "4.28.1", "4.28.2", "4.28.2.1", "4.28.10"]
 
 
 def test_normalize_references():

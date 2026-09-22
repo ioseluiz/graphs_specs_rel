@@ -45,6 +45,8 @@ class SectionsController(QObject):
         section = self.project.section(section_id)
         if section is None:
             return
+        if section.is_clause and column in (COL_CATEGORY, COL_STATUS, COL_PROGRESS, COL_RESP):
+            return  # una cláusula no tiene estatus, avance ni responsables; su categoría es fija
         try:
             if column == COL_TITLE:
                 self.project.update_section(section_id, section.code, str(value or "").strip(),

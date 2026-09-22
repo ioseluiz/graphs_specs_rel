@@ -1,7 +1,8 @@
 # Mapa de referencias
 
-El mapa es un **lienzo libre**: cada sección es un nodo octogonal y cada relación una flecha. Usted decide
-dónde va cada nodo; la aplicación nunca reacomoda lo que ya movió.
+El mapa es un **lienzo libre**: cada sección es un nodo octogonal, cada cláusula del pliego un rectángulo
+redondeado rosado y cada relación una flecha. Usted decide dónde va cada nodo; la aplicación nunca reacomoda lo
+que ya movió.
 
 ![Mapa](img/mapa.png)
 
@@ -14,6 +15,7 @@ dónde va cada nodo; la aplicación nunca reacomoda lo que ya movió.
 | Zoom | Rueda del mouse. **Ctrl+0** ajusta todo a la vista, **Ctrl+1** vuelve al 100 %. |
 | Desplazar la vista | Arrastre con el **botón central** o mantenga **Espacio** y arrastre. |
 | Rejilla | *Ajustar a rejilla* alinea los nodos al soltarlos (vea abajo); *Ver → Mostrar rejilla* muestra u oculta las líneas de fondo. |
+| Saltos en cruces | *Ver → Saltos en cruces de flechas*: donde una flecha cruza a otra, el tramo horizontal dibuja un pequeño arco sobre el vertical. Desactívelo si prefiere líneas planas. |
 
 ## Ajustar a rejilla: para qué sirve
 
@@ -51,7 +53,9 @@ ofrece *Crear relación desde aquí*. Mientras el modo Conectar está activo los
 - **Doble clic sobre una flecha** agrega un punto de quiebre que puede arrastrar. Doble clic sobre el punto lo
   quita. Clic derecho → *Restablecer ruta automática* borra los puntos; *Puerto de salida / entrada* fija el
   lado por el que la flecha sale o entra.
-- Las flechas pueden cruzarse: la aplicación no lo impide, usted decide el trazado.
+- Las flechas pueden cruzarse: la aplicación no lo impide, usted decide el trazado. Para que el cruce se lea,
+  el **tramo horizontal dibuja un pequeño salto** (arco) sobre el vertical, como en Visio o draw.io; el salto se
+  ve también en los PNG/SVG exportados y se desactiva en *Ver → Saltos en cruces de flechas*.
 
 ## Menú contextual del nodo (clic derecho)
 
