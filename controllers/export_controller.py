@@ -110,10 +110,10 @@ def paint_projected_scene(painter: QPainter, scene: dict) -> None:
         near = 1.0 - (n["depth"] - d_min) / span  # 1 = más cerca de la cámara
         return 5.0 + 6.0 * near
 
-    edge_color = QColor(palette.EDGE_COLOR)
     # Aristas primero (de atrás hacia adelante), con el tramo final más intenso para indicar dirección.
     edges = sorted(scene["edges"], key=lambda e: -(nodes[e["a"]]["depth"] + nodes[e["b"]]["depth"]))
     for e in edges:
+        edge_color = QColor(e.get("color") or palette.EDGE_COLOR)   # color propio de la flecha, si lo tiene
         a, b = nodes[e["a"]], nodes[e["b"]]
         pa, pb = QPointF(a["x"], a["y"]), QPointF(b["x"], b["y"])
         if e.get("paired"):

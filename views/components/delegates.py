@@ -1,7 +1,7 @@
 """Delegados de la tabla de relaciones y del popup de autocompletado."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QModelIndex, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -108,7 +108,8 @@ class RelationKindDelegate(QStyledItemDelegate):
             model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
-        from models.relations_table_model import ROLE_CODE_A, ROLE_CODE_B
+        from models.relations_table_model import ROLE_CODE_A, ROLE_CODE_B, ROLE_LINE_STYLE
+        from views.components.canvas.line_style_qt import draw_sample
 
         painter.save()
         bg = index.data(Qt.ItemDataRole.BackgroundRole)
@@ -129,9 +130,26 @@ class RelationKindDelegate(QStyledItemDelegate):
                          int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter), label)
         painter.setFont(self._SMALL)
         painter.setPen(QColor(palette.TEXT_SECONDARY))
-        painter.drawText(QRect(r.left(), top + fm.height(), r.width(), fm_small.height()),
-                         int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
-                         fm_small.elidedText(detail, Qt.TextElideMode.ElideMiddle, r.width() - 6))
+        code_a, code_b = str(index.data(ROLE_CODE_A) or ""), str(index.data(ROLE_CODE_B) or "")
+        style = index.data(ROLE_LINE_STYLE)
+        sample_w, gap = 40, 6
+        wa, wb = fm_small.horizontalAdvance(code_a), fm_small.horizontalAdvance(code_b)
+        line_y, line_h = top + fm.height(), fm_small.height()
+        if style is not None and wa + wb + sample_w + 2 * gap <= r.width() - 6:
+            # Muestra real de la flecha (color, trazo, grosor acotado) entre los códigos A y B.
+            total = wa + gap + sample_w + gap + wb
+            x = r.left() + (r.width() - total) // 2
+            painter.drawText(QRect(x, line_y, wa, line_h), int(Qt.AlignmentFlag.AlignVCenter), code_a)
+            color, dash, width = style
+            draw_sample(painter, QRectF(x + wa + gap, line_y, sample_w, line_h), color, dash,
+                        min(width if width is not None else 1.6, 3.0), arrow=True)
+            painter.setPen(QColor(palette.TEXT_SECONDARY))
+            painter.drawText(QRect(x + wa + gap + sample_w + gap, line_y, wb, line_h),
+                             int(Qt.AlignmentFlag.AlignVCenter), code_b)
+        else:
+            painter.drawText(QRect(r.left(), line_y, r.width(), line_h),
+                             int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter),
+                             fm_small.elidedText(detail, Qt.TextElideMode.ElideMiddle, r.width() - 6))
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802

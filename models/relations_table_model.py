@@ -20,6 +20,7 @@ ROLE_BORDER = Qt.ItemDataRole.UserRole + 6
 ROLE_UI_KIND = Qt.ItemDataRole.UserRole + 7
 ROLE_CODE_A = Qt.ItemDataRole.UserRole + 8
 ROLE_CODE_B = Qt.ItemDataRole.UserRole + 9
+ROLE_LINE_STYLE = Qt.ItemDataRole.UserRole + 10   # (color|None, trazo, grosor|None) de la flecha
 
 INVERT_OPTION = "Invertir dirección (B → A)"   # opción del combo de la celda Relación
 FLASH_COLOR = "#FFF2CC"
@@ -165,6 +166,8 @@ class RelationsTableModel(QAbstractTableModel):
         if role in (ROLE_CODE_A, ROLE_CODE_B):
             sec = self.project.section(a_id if role == ROLE_CODE_A else b_id)
             return sec.code if sec else ""
+        if role == ROLE_LINE_STYLE:
+            return rel.style
         if role == Qt.ItemDataRole.BackgroundRole and self._flashed == rid:
             from PyQt6.QtGui import QColor
             return QColor(FLASH_COLOR)

@@ -53,11 +53,15 @@ def _row_relation(row: sqlite3.Row) -> Relation:
             waypoints = [(float(x), float(y)) for x, y in json.loads(raw)]
         except (ValueError, TypeError):
             waypoints = None
+    keys = row.keys()
     return Relation(
         id=row["id"], source_id=row["source_id"], target_id=row["target_id"],
         kind=RelationKind(row["kind"]), waypoints=waypoints,
         source_port=row["source_port"], target_port=row["target_port"],
         notes=row["notes"], created_at=row["created_at"],
+        line_color=row["line_color"] if "line_color" in keys else None,
+        line_dash=(row["line_dash"] if "line_dash" in keys and row["line_dash"] else "solid"),
+        line_width=(float(row["line_width"]) if "line_width" in keys and row["line_width"] is not None else None),
     )
 
 
@@ -327,6 +331,10 @@ class RelationRepo(_Repo):
 
     def update_notes(self, relation_id: int, notes: str | None) -> None:
         self.conn.execute("UPDATE relations SET notes = ? WHERE id = ?", (notes, relation_id))
+
+    def update_style(self, relation_id: int, color: str | None, dash: str, width: float | None) -> None:
+        self.conn.execute("UPDATE relations SET line_color = ?, line_dash = ?, line_width = ? WHERE id = ?",
+                          (color, dash, width, relation_id))
 
     def delete(self, relation_id: int) -> None:
         self.conn.execute("DELETE FROM relations WHERE id = ?", (relation_id,))

@@ -125,6 +125,17 @@ class Relation:
     target_port: Side | None = None
     notes: str | None = None
     created_at: str = ""
+    line_color: str | None = None     # None = palette.EDGE_COLOR
+    line_dash: str = "solid"          # ver models.line_styles.DASH_KEYS
+    line_width: float | None = None   # None = models.line_styles.DEFAULT_WIDTH
+
+    @property
+    def has_custom_style(self) -> bool:
+        return self.line_color is not None or self.line_dash != "solid" or self.line_width is not None
+
+    @property
+    def style(self) -> tuple[str | None, str, float | None]:
+        return (self.line_color, self.line_dash, self.line_width)
 
     def touches(self, section_id: int) -> bool:
         return section_id in (self.source_id, self.target_id)

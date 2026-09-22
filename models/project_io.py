@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable
 
 from models.entities import UiKind
+from models.line_styles import DASH_LABELS, WIDTH_PRESETS, dash_label, parse_dash, parse_width, valid_hex, width_label
 from models.relation_normalizer import (
     DuplicateRelationError,
     SelfRelationError,
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from models.project_model import ProjectModel
 
 SECTION_HEADERS = ["Número", "Descripción", "Categoría", "Color", "Estatus", "Avance", "Responsables", "Observaciones"]
-RELATION_HEADERS = ["Sección A", "Relación", "Sección B", "Observaciones"]
+RELATION_HEADERS = ["Sección A", "Relación", "Sección B", "Observaciones", "Color", "Trazo", "Grosor"]
 PROJECT_FIELDS = [("Código", "code"), ("Nombre", "name")]
 RESPONSIBLE_COLORS = ("#5B9BD5", "#70AD47", "#7030A0", "#BF9000", "#ED7D31", "#C00000", "#00B0F0", "#7F7F7F")
 SHEET_PROJECT = "Proyecto"
@@ -49,11 +50,12 @@ EXAMPLE_SECTIONS = [
     ("4.28.61", "PAGO FINAL", "Cláusula", "", "", "", "", "Cláusula del pliego: sin estatus ni avance"),
 ]
 EXAMPLE_RELATIONS = [
-    ("31 23 00 - Excavación", UiKind.REFERENCES.value, "03 30 00 - Concreto", ""),
-    ("01 31 19", UiKind.REFERENCED_BY.value, "31 23 00", "Ver artículo 3.2"),
-    ("01 35 29", UiKind.REFERENCES.value, "03 30 00", ""),
-    ("03 30 00", UiKind.REFERENCES.value, "01 35 29", "Sentido contrario: son dos flechas"),
-    ("01 31 19", UiKind.REFERENCES.value, "4.28.61", ""),
+    ("31 23 00 - Excavación", UiKind.REFERENCES.value, "03 30 00 - Concreto", "", "", "", ""),
+    ("01 31 19", UiKind.REFERENCED_BY.value, "31 23 00", "Ver artículo 3.2", "", "", ""),
+    ("01 35 29", UiKind.REFERENCES.value, "03 30 00", "", "", "", ""),
+    ("03 30 00", UiKind.REFERENCES.value, "01 35 29", "Sentido contrario: son dos flechas", "", "", ""),
+    ("01 31 19", UiKind.REFERENCES.value, "4.28.61", "Estilo propio: roja, discontinua, gruesa",
+     "#C00000", "Discontinua", "Gruesa"),
 ]
 HELP_LINES = [
     "Plantilla de SpecRel para crear un mapa de referencias desde Excel.",
@@ -82,6 +84,9 @@ HELP_LINES = [
     "  Relación -> 'Hace referencia a →' (A → B) o '← Es referenciada por' (B → A).",
     "              También se aceptan '->', '<-', 'A->B'.",
     "  Observaciones -> texto libre; se muestra al pasar el mouse sobre la flecha.",
+    "  Color   -> opcional, #RRGGBB (vacío = azul predeterminado).",
+    "  Trazo   -> opcional: Continua, Discontinua, Punteada o Punto y raya (vacío = continua).",
+    "  Grosor  -> opcional: Fina, Normal, Gruesa, Muy gruesa o un número de 0.5 a 8 (vacío = normal).",
     "  Cada dirección es una flecha independiente: si A referencia a B y B referencia a A,",
     "  escriba dos filas (A → B y B → A). Las filas repetidas se omiten y se informan al final.",
     "",
@@ -159,7 +164,7 @@ def write_template_xlsx(path: Path, with_examples: bool = True) -> None:
         ws.freeze_panes = "A2"
 
     write_headers(ws_sec, SECTION_HEADERS, [16, 40, 26, 10, 18, 10, 22, 40])
-    write_headers(ws_rel, RELATION_HEADERS, [40, 28, 40, 40])
+    write_headers(ws_rel, RELATION_HEADERS, [40, 28, 40, 40, 10, 14, 12])
     for i, (label, _key) in enumerate(PROJECT_FIELDS, start=1):
         cell = ws_proj.cell(row=i, column=1, value=label)
         cell.font = Font(bold=True)
@@ -184,6 +189,16 @@ def write_template_xlsx(path: Path, with_examples: bool = True) -> None:
     dv_pct.error = "El avance debe estar entre 0 y 100."
     ws_sec.add_data_validation(dv_pct)
     dv_pct.add("F2:F1000")
+    dv_dash = DataValidation(type="list", formula1='"' + ",".join(DASH_LABELS.values()) + '"', allow_blank=True)
+    dv_dash.prompt = "Trazo de la flecha (vacío = continua)"
+    ws_rel.add_data_validation(dv_dash)
+    dv_dash.add("F2:F1000")
+    dv_width = DataValidation(type="list", formula1='"' + ",".join(n for n, _w in WIDTH_PRESETS) + '"',
+                              allow_blank=True, errorStyle="warning")
+    dv_width.prompt = "Fina / Normal / Gruesa / Muy gruesa, o un número de 0.5 a 8"
+    dv_width.error = "Use un preset o un número de 0.5 a 8 px."
+    ws_rel.add_data_validation(dv_width)
+    dv_width.add("G2:G1000")
 
     for i, line in enumerate(HELP_LINES, start=1):
         ws_help.cell(row=i, column=1, value=line)
@@ -247,6 +262,9 @@ _RELATION_KEYS = {
     "kind": ("relacion", "tipo de relacion", "tipo", "relation", "kind", "conexion"),
     "b": ("seccion b", "b", "destino", "target", "to", "section b"),
     "notes": ("observaciones", "observacion", "notas", "notes", "comentarios", "observations", "comentario"),
+    "color": ("color", "colour", "color de linea", "line color"),
+    "dash": ("trazo", "estilo", "estilo de linea", "linea", "dash", "style", "line style", "tipo de linea"),
+    "width": ("grosor", "ancho", "width", "espesor", "line width"),
 }
 _PROJECT_KEYS = {
     "code": ("codigo", "código", "code", "codigo del proyecto"),
@@ -412,14 +430,7 @@ def parse_kind(text: str) -> UiKind | str:
 
 
 def _valid_hex(value: str) -> str | None:
-    v = (value or "").strip().upper()
-    if not v:
-        return None
-    if not v.startswith("#"):
-        v = "#" + v
-    if len(v) == 7 and all(c in "0123456789ABCDEF" for c in v[1:]):
-        return v
-    return None
+    return valid_hex(value)
 
 
 def KEEP_STATUS(model: "ProjectModel", section) -> int | None:  # noqa: N802
@@ -591,12 +602,35 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
         sa, sb = model.section(source_id), model.section(target_id)
         return f"{sa.code if sa else '?'} → {sb.code if sb else '?'}"
 
-    def add_directed(row_no: int, a_id: int, kind: UiKind, b_id: int, notes: str | None) -> None:
+    def parse_style(row_no: int, row: dict[str, str]) -> tuple[str | None, str, float | None] | None:
+        """(color, trazo, grosor) de la fila; None si las tres celdas vienen vacías. Celdas inválidas: aviso."""
+        raw_c, raw_d, raw_w = (row.get(k, "").strip() for k in ("color", "dash", "width"))
+        if not (raw_c or raw_d or raw_w):
+            return None
+        color = valid_hex(raw_c) if raw_c else None
+        if raw_c and color is None:
+            summary.errors.append(f"Relaciones fila {row_no}: color «{raw_c}» no válido (use #RRGGBB); se ignora.")
+        try:
+            dash = parse_dash(raw_d)
+        except ValueError:
+            summary.errors.append(f"Relaciones fila {row_no}: trazo «{raw_d}» no reconocido; se ignora.")
+            dash = "solid"
+        try:
+            width = parse_width(raw_w)
+        except ValueError as exc:
+            summary.errors.append(f"Relaciones fila {row_no}: grosor «{raw_w}» no válido ({exc}); se ignora.")
+            width = None
+        return color, dash, width
+
+    def add_directed(row_no: int, a_id: int, kind: UiKind, b_id: int, notes: str | None,
+                     style: tuple[str | None, str, float | None] | None = None) -> None:
         source_id, target_id = (a_id, b_id) if kind is UiKind.REFERENCES else (b_id, a_id)
         try:
-            model.add_relation(a_id, kind, b_id, notes)
+            rel = model.add_relation(a_id, kind, b_id, notes)
             summary.relations_created += 1
             seen_rows[(source_id, target_id)] = row_no
+            if style is not None:
+                model.set_relation_style(rel.id, color=style[0], dash=style[1], width=style[2])
         except DuplicateRelationError as exc:
             summary.relations_duplicated += 1
             first = seen_rows.get((source_id, target_id))
@@ -604,6 +638,8 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
             summary.skipped.append(f"Relaciones fila {row_no}: {describe(source_id, target_id)} omitida ({where}).")
             if notes and not (exc.existing.notes or "").strip():
                 model.set_relation_notes(exc.existing.id, notes)
+            if style is not None and not exc.existing.has_custom_style:
+                model.set_relation_style(exc.existing.id, color=style[0], dash=style[1], width=style[2])
         except SelfRelationError:
             summary.errors.append(f"Relaciones fila {row_no}: una sección no puede relacionarse consigo misma.")
 
@@ -621,13 +657,14 @@ def _apply_tables(model: "ProjectModel", tables: Tables, on_progress: ProgressFn
             continue
         summary.sections_created += int(created_a) + int(created_b)
         notes = row.get("notes", "").strip() or None
+        style = parse_style(i, row)
         kind = parse_kind(row.get("kind", ""))
         if kind == KIND_BOTH:
             # Texto antiguo «Referencia mutua»: hoy son dos flechas independientes.
-            add_directed(i, a.id, UiKind.REFERENCES, b.id, notes)
-            add_directed(i, b.id, UiKind.REFERENCES, a.id, notes)
+            add_directed(i, a.id, UiKind.REFERENCES, b.id, notes, style)
+            add_directed(i, b.id, UiKind.REFERENCES, a.id, notes, style)
         else:
-            add_directed(i, a.id, kind, b.id, notes)
+            add_directed(i, a.id, kind, b.id, notes, style)
     return summary
 
 
@@ -655,7 +692,8 @@ def export_tables_xlsx(model: "ProjectModel", path: Path) -> None:
         sa, sb = model.section(a_id), model.section(b_id)
         if sa is None or sb is None:
             continue
-        ws_rel.append([sa.label, kind.value, sb.label, rel.notes or ""])
+        ws_rel.append([sa.label, kind.value, sb.label, rel.notes or "", rel.line_color or "",
+                       dash_label(rel.line_dash), width_label(rel.line_width)])
     try:
         wb.save(path)
     except OSError as exc:

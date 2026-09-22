@@ -32,6 +32,7 @@ from models.entities import (
 from models.graph_engine import GraphEngine
 from models.layout_engine import place_new_node
 from models.clause_catalog import ClauseCatalog
+from models.line_styles import DASH_KEYS, WIDTH_MAX, WIDTH_MIN, valid_hex
 from models.master_catalog import CatalogRecord, MasterCatalog, normalize_code
 from models.relation_normalizer import (
     DuplicateRelationError,
@@ -767,6 +768,58 @@ class ProjectModel(QObject):
         self._relations[relation_id] = new
         self.relationUpdated.emit(relation_id)
         return new
+
+    def set_relation_style(self, relation_id: int, *, color: object = KEEP, dash: object = KEEP,
+                           width: object = KEEP) -> Relation:
+        """Estilo propio de la flecha. KEEP conserva el valor; None (color/grosor) y 'solid' = predeterminado.
+
+        Lanza ValueError (mensaje en español) si el color no es #RRGGBB, el trazo no existe o el grosor
+        está fuera de rango. Emite relationUpdated (la escena, la tabla y la vista 3D se repintan).
+        """
+        assert self.db is not None
+        rel = self._relations[relation_id]
+        if color is KEEP:
+            new_color = rel.line_color
+        elif color:
+            new_color = valid_hex(str(color))
+            if new_color is None:
+                raise ValueError(f"Color no válido: {color!r}. Use el formato #RRGGBB.")
+        else:
+            new_color = None
+        new_dash = rel.line_dash if dash is KEEP else (str(dash) if dash else "solid")
+        if new_dash not in DASH_KEYS:
+            raise ValueError(f"Trazo desconocido: {dash!r}.")
+        if width is KEEP:
+            new_width = rel.line_width
+        elif width is None:
+            new_width = None
+        else:
+            new_width = round(float(width), 2)  # type: ignore[arg-type]
+            if not WIDTH_MIN <= new_width <= WIDTH_MAX:
+                raise ValueError(f"El grosor debe estar entre {WIDTH_MIN:g} y {WIDTH_MAX:g} px.")
+        if (new_color, new_dash, new_width) == rel.style:
+            return rel
+        with self.db.transaction():
+            self.relations_repo.update_style(relation_id, new_color, new_dash, new_width)
+            self.db.touch()
+        new = self.relations_repo.get(relation_id)
+        assert new is not None
+        self._relations[relation_id] = new
+        self.relationUpdated.emit(relation_id)
+        return new
+
+    def set_relations_style(self, relation_ids: Iterable[int], *, color: object = KEEP, dash: object = KEEP,
+                            width: object = KEEP) -> None:
+        """Mismo estilo para varias flechas, en una sola transacción."""
+        ids = [rid for rid in relation_ids if rid in self._relations]
+        if not ids:
+            return
+        with self.bulk():
+            for rid in ids:
+                self.set_relation_style(rid, color=color, dash=dash, width=width)
+
+    def reset_relation_style(self, relation_id: int) -> Relation:
+        return self.set_relation_style(relation_id, color=None, dash="solid", width=None)
 
     def set_relation_geometry(self, relation_id: int, waypoints: list[tuple[float, float]] | None,
                               source_port: Side | None, target_port: Side | None) -> None:

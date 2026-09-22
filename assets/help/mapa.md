@@ -53,6 +53,8 @@ ofrece *Crear relación desde aquí*. Mientras el modo Conectar está activo los
 - **Doble clic sobre una flecha** agrega un punto de quiebre que puede arrastrar. Doble clic sobre el punto lo
   quita. Clic derecho → *Restablecer ruta automática* borra los puntos; *Puerto de salida / entrada* fija el
   lado por el que la flecha sale o entra.
+- Clic derecho → **Estilo de la flecha** cambia el color, el trazo (continua, discontinua, punteada, punto y
+  raya) y el grosor; con varias flechas seleccionadas se aplica a todas. Vea *Relaciones*.
 - Las flechas pueden cruzarse: la aplicación no lo impide, usted decide el trazado. Para que el cruce se lea,
   el **tramo horizontal dibuja un pequeño salto** (arco) sobre el vertical, como en Visio o draw.io; el salto se
   ve también en los PNG/SVG exportados y se desactiva en *Ver → Saltos en cruces de flechas*.

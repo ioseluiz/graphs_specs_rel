@@ -125,6 +125,11 @@ class GraphScene(QGraphicsScene):
         edge.set_geometry(waypoints, source_port, target_port)
         self.schedule_jumps()
 
+    def set_edge_style(self, relation_id: int, color: str | None, dash: str, width: float | None) -> None:
+        edge = self.edges.get(relation_id)
+        if edge is not None:
+            edge.set_style(color, dash, width)
+
     def remove_edge(self, relation_id: int) -> None:
         edge = self.edges.pop(relation_id, None)
         if edge is None:

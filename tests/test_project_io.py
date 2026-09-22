@@ -179,3 +179,39 @@ def test_clause_row_ignores_status_progress_and_responsibles(tmp_path, model):
     export_tables_xlsx(model, out)
     rows = {r["code"]: r for r in read_tables([out]).sections}
     assert rows["4.28.61"]["category"] == "Cláusula" and rows["4.28.61"]["progress"] == ""
+
+
+def test_relation_style_roundtrip_and_invalid_values(tmp_path, model):
+    a = model.add_section("03 30 00", "Concreto")
+    b = model.add_section("31 23 00", "Excavación")
+    c = model.add_section("33 40 00", "Drenaje")
+    r1 = model.add_relation(a.id, UiKind.REFERENCES, b.id)
+    model.add_relation(b.id, UiKind.REFERENCES, c.id)
+    model.set_relation_style(r1.id, color="#C00000", dash="dash", width=2.5)
+    out = tmp_path / "estilos.xlsx"
+    export_tables_xlsx(model, out)
+    rows = {(r["a"], r["b"]): r for r in read_tables([out]).relations}
+    styled = rows[("03 30 00 - Concreto", "31 23 00 - Excavación")]
+    assert (styled["color"], styled["dash"], styled["width"]) == ("#C00000", "Discontinua", "Gruesa")
+    plain = rows[("31 23 00 - Excavación", "33 40 00 - Drenaje")]
+    assert (plain["color"], plain["dash"], plain["width"]) == ("", "", "")
+    # Reimportar en un proyecto nuevo conserva el estilo y deja la otra en predeterminado.
+    from models.project_model import ProjectModel
+
+    fresh = ProjectModel(master=model.master, clauses=model.clauses)
+    fresh.new_project(None, "X", "Y")
+    apply_tables(fresh, read_tables([out]))
+    by_codes = {(_codes(fresh, r)): r for r in fresh.relations()}
+    assert by_codes[("03 30 00", "31 23 00")].style == ("#C00000", "dash", 2.5)
+    assert not by_codes[("31 23 00", "33 40 00")].has_custom_style
+    fresh.close()
+    # Valores inválidos: la relación se crea y cada celda mala deja un aviso.
+    sec, rel = write_template_csv(tmp_path)
+    rel.write_text("Sección A;Relación;Sección B;Observaciones;Color;Trazo;Grosor\n"
+                   "D;->;E;;rojo;ondulada;25\n"
+                   "E;->;F;;;punteada;2\n", encoding="utf-8-sig")
+    summary = apply_tables(model, read_tables([rel]))
+    assert summary.relations_created == 2 and len(summary.errors) == 3
+    de = next(r for r in model.relations() if _codes(model, r) == ("D", "E"))
+    ef = next(r for r in model.relations() if _codes(model, r) == ("E", "F"))
+    assert not de.has_custom_style and ef.style == (None, "dot", 2.0)

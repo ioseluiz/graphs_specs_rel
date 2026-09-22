@@ -622,3 +622,47 @@ def test_line_jumps_drawn_on_horizontal_segment_and_toggle(app, tmp_path, qtbot)
     window.scene._jumps_later.flush()
     assert h.jumps == []
     QSettings().setValue("canvas/line_jumps", True)
+
+
+def test_relation_style_reaches_canvas_menu_and_dialog(app, qtbot):
+    from PyQt6.QtCore import QPoint
+
+    from models.relations_table_model import COL_KIND, ROLE_LINE_STYLE
+    from views.components.line_style_dialog import LineStyleDialog
+
+    project, window, controller, table_model = app
+    _add(window, "A", UiKind.REFERENCES, "B")
+    _add(window, "B", UiKind.REFERENCES, "C")
+    rel = next(r for r in project.relations() if project.section(r.source_id).code == "A")
+    edge = window.scene.edges[rel.id]
+    project.set_relation_notes(rel.id, "Ver artículo 3.2")
+    assert "Ver artículo 3.2" in edge.toolTip()                      # observaciones en el tooltip
+    project.set_relation_style(rel.id, color="#C00000", dash="dash", width=8.0)
+    assert (edge.line_color, edge.line_dash, edge.line_width) == ("#C00000", "dash", 8.0)
+    assert edge._bounds_margin >= 16 and edge.base_color().name().upper() == "#C00000"
+    styles = [table_model.index(r, COL_KIND).data(ROLE_LINE_STYLE) for r in range(table_model.rowCount())]
+    assert ("#C00000", "dash", 8.0) in styles                          # la tabla expone el estilo a la muestra
+    menu = controller.canvas._build_edge_menu(rel.id, QPoint())
+    titles = [a.text() for a in menu.actions()]
+    assert "Estilo de la flecha" in titles
+    style_menu = next(a.menu() for a in menu.actions() if a.text() == "Estilo de la flecha")
+    sub = [a.text() for a in style_menu.actions()]
+    assert "Color" in sub and "Trazo" in sub and "Grosor" in sub and "Estilo de línea…" in sub
+    reset = next(a for a in style_menu.actions() if a.text() == "Restablecer estilo")
+    assert reset.isEnabled()
+    reset.trigger()
+    assert not project.relation(rel.id).has_custom_style and edge.line_dash == "solid"
+    # Con dos flechas seleccionadas, el submenú aplica a ambas.
+    other = next(r for r in project.relations() if r.id != rel.id)
+    window.scene.clearSelection()
+    edge.setSelected(True)
+    window.scene.edges[other.id].setSelected(True)
+    menu2 = controller.canvas._build_edge_menu(rel.id, QPoint())
+    style2 = next(a for a in menu2.actions() if a.text().startswith("Estilo de las 2 flechas"))
+    dash_menu = next(a.menu() for a in style2.menu().actions() if a.text() == "Trazo")
+    next(a for a in dash_menu.actions() if a.text() == "Punteada").trigger()
+    assert project.relation(rel.id).line_dash == "dot" and project.relation(other.id).line_dash == "dot"
+    dialog = LineStyleDialog("#7030A0", "dashdot", 2.5, window, count=2)
+    assert dialog.values() == ("#7030A0", "dashdot", 2.5)
+    dialog.custom_color_check.setChecked(False)
+    assert dialog.values()[0] is None

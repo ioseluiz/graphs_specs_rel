@@ -26,6 +26,11 @@ EDGE_COLOR = "#4472C4"
 EDGE_SELECTED = "#1F4E79"
 EDGE_SELECTED_HALO = "#1F4E7955"      # halo translúcido bajo la flecha seleccionada
 EDGE_HOVER = "#2F5597"
+# Paleta rápida del submenú «Estilo de la flecha» (el primero es EDGE_COLOR).
+EDGE_PALETTE: tuple[tuple[str, str], ...] = (
+    ("Azul", "#4472C4"), ("Gris", "#7F7F7F"), ("Negro", "#1E1E1E"), ("Rojo", "#C00000"),
+    ("Naranja", "#ED7D31"), ("Verde", "#548235"), ("Morado", "#7030A0"), ("Marrón", "#843C0C"),
+)
 NODE_SELECTED_BORDER = "#1F4E79"
 NODE_LINKED_BORDER = "#1F4E79"        # secciones en los extremos de la flecha seleccionada
 NODE_LINKED_DARKEN = 112              # factor QColor.darker() del relleno de esas secciones

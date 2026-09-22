@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QObject, QPoint, QPointF, QSettings
 from PyQt6.QtGui import QAction, QColor, QIcon, QPixmap
-from PyQt6.QtWidgets import QColorDialog, QMenu, QMessageBox
+from PyQt6.QtWidgets import QColorDialog, QDialog, QMenu, QMessageBox
 
 from config import palette
-from models.entities import SIDES, Section, UiKind
+from models.entities import SIDES, Relation, Section, UiKind
 from models.layout_engine import initial_layout_2d
+from models.line_styles import DASH_KEYS, DASH_LABELS, DEFAULT_WIDTH, WIDTH_PRESETS
 from models.project_model import ProjectModel
 from utils.debounce import Debouncer
 from utils.workers import busy_cursor
+from views.components.canvas.line_style_qt import color_icon, dash_icon, width_icon
+from views.components.line_style_dialog import LineStyleDialog
 from views.components.section_editor_dialog import SectionEditorDialog
 from views.main_window import TAB_ANALYSIS, TAB_MAP, MainWindow
 
@@ -90,6 +93,7 @@ class CanvasController(QObject):
             for rel in self.project.relations():
                 self.scene.add_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
                                     rel.source_port, rel.target_port)
+                self._sync_edge_extras(rel)
             self.scene.grow_scene_rect()
             self.scene.refresh_jumps()
             self.view.fit_all()
@@ -135,17 +139,26 @@ class CanvasController(QObject):
         for sid in list(self.scene.nodes):
             self._on_section_updated(sid)
 
+    def _sync_edge_extras(self, rel: Relation) -> None:
+        """Estilo propio y observaciones (tooltip) de la flecha, que no viajan por add_edge/update_edge."""
+        self.scene.set_edge_style(rel.id, rel.line_color, rel.line_dash, rel.line_width)
+        edge = self.scene.edges.get(rel.id)
+        if edge is not None:
+            edge.set_notes(rel.notes)
+
     def _on_relation_added(self, relation_id: int) -> None:
         rel = self.project.relation(relation_id)
         if rel is not None:
             self.scene.add_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
                                 rel.source_port, rel.target_port)
+            self._sync_edge_extras(rel)
 
     def _on_relation_updated(self, relation_id: int) -> None:
         rel = self.project.relation(relation_id)
         if rel is not None:
             self.scene.update_edge(rel.id, rel.source_id, rel.target_id, rel.kind, rel.waypoints,
                                    rel.source_port, rel.target_port)
+            self._sync_edge_extras(rel)
 
     def _on_relation_geometry(self, relation_id: int) -> None:
         rel = self.project.relation(relation_id)
@@ -491,10 +504,15 @@ class CanvasController(QObject):
         self.window.analysis.select_section(section_id)
 
     def _edge_menu(self, relation_id: int, global_pos: QPoint) -> None:
+        menu = self._build_edge_menu(relation_id, global_pos)
+        if menu is not None:
+            menu.exec(global_pos)
+
+    def _build_edge_menu(self, relation_id: int, global_pos: QPoint) -> QMenu | None:
         rel = self.project.relation(relation_id)
         edge = self.scene.edges.get(relation_id)
         if rel is None or edge is None:
-            return
+            return None
         sa, sb = self.project.section(rel.source_id), self.project.section(rel.target_id)
         code_a, code_b = (sa.code if sa else "?"), (sb.code if sb else "?")
         menu = QMenu(self.window)
@@ -538,8 +556,85 @@ class CanvasController(QObject):
             else:
                 auto.triggered.connect(lambda: edge.set_forced_port(edge.source_port, None))
         menu.addSeparator()
+        self._add_style_menu(menu, relation_id)
+        menu.addSeparator()
         menu.addAction("Eliminar relación…", lambda: self.relations.delete_relation(relation_id))
-        menu.exec(global_pos)
+        return menu
+
+    # ------------------------------------------------------------------ estilo de las flechas
+    def _style_targets(self, relation_id: int) -> list[int]:
+        """La flecha del clic o, si está entre varias seleccionadas, todas las seleccionadas."""
+        selected = self.scene.selected_edge_ids()
+        return list(selected) if len(selected) > 1 and relation_id in selected else [relation_id]
+
+    def _add_style_menu(self, menu: QMenu, relation_id: int) -> None:
+        ids = self._style_targets(relation_id)
+        rels = [r for r in (self.project.relation(i) for i in ids) if r is not None]
+        if not rels:
+            return
+        title = "Estilo de la flecha" if len(ids) == 1 else f"Estilo de las {len(ids)} flechas seleccionadas"
+        style_menu = menu.addMenu(title)
+
+        def all_same(values: list) -> bool:
+            return len(set(values)) == 1
+
+        current_colors = [(r.line_color or palette.EDGE_COLOR).upper() for r in rels]
+        color_menu = style_menu.addMenu("Color")
+        for name, hex_color in palette.EDGE_PALETTE:
+            act = QAction(color_icon(hex_color), name, menu)
+            act.setCheckable(True)
+            act.setChecked(all_same(current_colors) and current_colors[0] == hex_color.upper())
+            act.triggered.connect(lambda _c=False, h=hex_color: self.project.set_relations_style(ids, color=h))
+            color_menu.addAction(act)
+        color_menu.addSeparator()
+        color_menu.addAction("Personalizar…", lambda: self.pick_edge_color(ids))
+        act_default = color_menu.addAction("Color predeterminado",
+                                           lambda: self.project.set_relations_style(ids, color=None))
+        act_default.setEnabled(any(r.line_color for r in rels))
+
+        dashes = [r.line_dash for r in rels]
+        dash_menu = style_menu.addMenu("Trazo")
+        for key in DASH_KEYS:
+            act = QAction(dash_icon(key), DASH_LABELS[key], menu)
+            act.setCheckable(True)
+            act.setChecked(all_same(dashes) and dashes[0] == key)
+            act.triggered.connect(lambda _c=False, k=key: self.project.set_relations_style(ids, dash=k))
+            dash_menu.addAction(act)
+
+        widths = [r.line_width if r.line_width is not None else DEFAULT_WIDTH for r in rels]
+        width_menu = style_menu.addMenu("Grosor")
+        for name, preset in WIDTH_PRESETS:
+            act = QAction(width_icon(preset), f"{name} ({preset:g} px)", menu)
+            act.setCheckable(True)
+            act.setChecked(all_same(widths) and abs(widths[0] - preset) < 1e-6)
+            value = None if abs(preset - DEFAULT_WIDTH) < 1e-6 else preset
+            act.triggered.connect(lambda _c=False, w=value: self.project.set_relations_style(ids, width=w))
+            width_menu.addAction(act)
+
+        style_menu.addSeparator()
+        style_menu.addAction("Estilo de línea…", lambda: self.edit_edge_style(ids))
+        act_reset = style_menu.addAction(
+            "Restablecer estilo", lambda: self.project.set_relations_style(ids, color=None, dash="solid", width=None))
+        act_reset.setEnabled(any(r.has_custom_style for r in rels))
+
+    def pick_edge_color(self, ids: list[int]) -> None:
+        rel = self.project.relation(ids[0]) if ids else None
+        if rel is None:
+            return
+        title = "Color de la flecha" if len(ids) == 1 else f"Color para {len(ids)} flechas"
+        chosen = QColorDialog.getColor(QColor(rel.line_color or palette.EDGE_COLOR), self.window, title)
+        if chosen.isValid():
+            self.project.set_relations_style(ids, color=chosen.name().upper())
+
+    def edit_edge_style(self, ids: list[int]) -> None:
+        rel = self.project.relation(ids[0]) if ids else None
+        if rel is None:
+            return
+        dialog = LineStyleDialog(rel.line_color, rel.line_dash, rel.line_width, self.window, count=len(ids))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        color, dash, width = dialog.values()
+        self.project.set_relations_style(ids, color=color, dash=dash, width=width)
 
     def _canvas_menu(self, scene_pos: QPointF, global_pos: QPoint) -> None:
         menu = QMenu(self.window)

@@ -190,11 +190,13 @@ class Graph3DWidget(QWidget):
         paired: np.ndarray,             # (E,) bool: existe también la arista inversa
         labels: list[str],
         degrees: list[int],
+        edge_colors: list[str] | None = None,   # color propio por arista (None = EDGE_COLOR)
     ) -> None:
         first_time = self._data is None or len(self._data["ids"]) == 0
+        colors = list(edge_colors) if edge_colors else [palette.EDGE_COLOR] * len(edges)
         self._data = {
             "ids": node_ids, "pos": positions, "fills": fills, "edges": edges,
-            "paired": paired, "labels": labels, "degrees": degrees,
+            "paired": paired, "labels": labels, "degrees": degrees, "edge_colors": colors,
         }
         self._status = ""
         self._update_info()
@@ -264,8 +266,9 @@ class Graph3DWidget(QWidget):
         if len(edges):
             seg = np.zeros((len(edges) * 2, 3), dtype=np.float32)
             seg_col = np.zeros((len(edges) * 2, 4), dtype=np.float32)
-            base = _rgba(palette.EDGE_COLOR, 1.0)
+            edge_colors = data.get("edge_colors") or []
             for k, (a, b) in enumerate(edges):
+                base = _rgba(edge_colors[k] if k < len(edge_colors) else palette.EDGE_COLOR, 1.0)
                 pa, pb = pos[a], pos[b]
                 if data["paired"][k]:
                     # Dos flechas opuestas entre los mismos puntos: separarlas para que no se anulen.
@@ -375,7 +378,7 @@ class Graph3DWidget(QWidget):
         if not self.ensure_gl():
             raise RuntimeError("La vista 3D no está disponible en este equipo.")
         data = self._data or {"ids": [], "pos": np.zeros((0, 3)), "fills": [], "edges": np.zeros((0, 2), int),
-                              "paired": np.zeros(0, bool), "labels": [], "degrees": []}
+                              "paired": np.zeros(0, bool), "labels": [], "degrees": [], "edge_colors": []}
         view = self._view
         w, h = max(1, view.width()), max(1, view.height())
         try:  # pyqtgraph >= 0.14 exige región y viewport explícitos
@@ -404,5 +407,7 @@ class Graph3DWidget(QWidget):
         for k, (a, b) in enumerate(data["edges"]):
             ids = data["ids"]
             visible = hl is None or (ids[a] in hl and ids[b] in hl)
-            edges.append({"a": int(a), "b": int(b), "paired": bool(data["paired"][k]), "visible": visible})
+            colors = data.get("edge_colors") or []
+            edges.append({"a": int(a), "b": int(b), "paired": bool(data["paired"][k]), "visible": visible,
+                          "color": colors[k] if k < len(colors) else palette.EDGE_COLOR})
         return {"size": (w, h), "nodes": nodes, "edges": edges}

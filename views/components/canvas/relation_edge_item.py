@@ -10,7 +10,9 @@ from PyQt6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyleOptionGraphi
 
 from config import palette
 from models.entities import RelationKind, Side  # noqa: F401  (kind se conserva por compatibilidad)
+from models.line_styles import DEFAULT_WIDTH
 from views.components.canvas.line_jumps import Jump
+from views.components.canvas.line_style_qt import make_pen
 from views.components.canvas.orthogonal_router import (
     choose_ports,
     choose_ports_near,
@@ -55,6 +57,9 @@ class RelationEdgeItem(QGraphicsPathItem):
         self._dimmed = False
         self._highlight = False
         self.notes = ""
+        self.line_color: str | None = None      # estilo propio (None / 'solid' = paleta global)
+        self.line_dash = "solid"
+        self.line_width: float | None = None
         self.jumps: list[Jump] = []             # saltos (arcos) sobre flechas verticales que cruza; los fija la escena
         self._render_path = QPainterPath()      # trazado pintado: la polilínea lógica + arcos de salto
         self._bounds_margin = ARROW_LEN
@@ -123,9 +128,9 @@ class RelationEdgeItem(QGraphicsPathItem):
                 path.lineTo(p)
         # shape()/boundingRect() se consultan en cada repintado, selección y hover: se calculan una vez aquí.
         stroker = QPainterPathStroker()
-        stroker.setWidth(10)
+        stroker.setWidth(max(10.0, self.base_width() * 3))
         self._shape = stroker.createStroke(path)
-        m = self._bounds_margin
+        m = self._bounds_margin = self._margin()
         self._bounds = self._shape.controlPointRect().adjusted(-m, -m, m, m)
         self.setPath(path)
         self._render_path = self._build_render_path()
@@ -145,7 +150,7 @@ class RelationEdgeItem(QGraphicsPathItem):
         if list(jumps) == self.jumps:
             return
         self.jumps = list(jumps)
-        margin = max(ARROW_LEN, max((j.r for j in self.jumps), default=0.0))
+        margin = self._margin()
         if margin != self._bounds_margin:
             self.prepareGeometryChange()
             self._bounds_margin = margin
@@ -187,6 +192,23 @@ class RelationEdgeItem(QGraphicsPathItem):
     def set_notes(self, notes: str | None) -> None:
         self.notes = (notes or "").strip()
         self._update_tooltip()
+
+    # ------------------------------------------------------------------ estilo propio
+    def base_color(self) -> QColor:
+        return QColor(self.line_color or palette.EDGE_COLOR)
+
+    def base_width(self) -> float:
+        return self.line_width if self.line_width is not None else DEFAULT_WIDTH
+
+    def _margin(self) -> float:
+        """Margen del boundingRect: punta de flecha, grosor (halo incluido) y el arco de salto más grande."""
+        return max(ARROW_LEN, self.base_width() * 2, max((j.r for j in self.jumps), default=0.0))
+
+    def set_style(self, color: str | None, dash: str, width: float | None) -> None:
+        if (color, dash, width) == (self.line_color, self.line_dash, self.line_width):
+            return
+        self.line_color, self.line_dash, self.line_width = color, dash, width
+        self.update_path()   # la zona clicable y el margen dependen del grosor
 
     def _update_tooltip(self) -> None:
         text = f"{self.source.code} → {self.target.code}"
@@ -317,15 +339,15 @@ class RelationEdgeItem(QGraphicsPathItem):
     # ------------------------------------------------------------------ pintura
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        color = QColor(palette.EDGE_COLOR)
-        width = 1.6
+        # El color propio se conserva al seleccionar o pasar el mouse (se oscurece); el rojo del análisis manda.
+        color, width = self.base_color(), self.base_width()
         selected = self.isSelected()
         if self._highlight:
-            color, width = QColor(palette.HIGHLIGHT_BORDER), 2.6
+            color, width = QColor(palette.HIGHLIGHT_BORDER), width + 1.0
         elif selected:
-            color, width = QColor(palette.EDGE_SELECTED), 3.0
+            color, width = QColor(color).darker(140), width + 1.4
         elif self._hover:
-            color, width = QColor(palette.EDGE_HOVER), 2.2
+            color, width = QColor(color).darker(115), width + 0.6
         if selected:
             # Halo translúcido bajo la flecha: la selección se distingue de las demás líneas a simple vista.
             halo = QPen(QColor(palette.EDGE_SELECTED_HALO), width + 7)
@@ -336,10 +358,7 @@ class RelationEdgeItem(QGraphicsPathItem):
             painter.drawPath(self._render_path)
             for arrow in self._arrows:
                 painter.drawPolygon(arrow)
-        pen = QPen(color, width)
-        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-        pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-        painter.setPen(pen)
+        painter.setPen(make_pen(color, width, self.line_dash))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self._render_path)
         painter.setPen(QPen(color, 1))

@@ -264,3 +264,46 @@ def test_sections_are_naturally_ordered(model):
     for code in ("4.28.10", "31 23 00", "4.28.2", "03 30 00"):
         model.add_section(code, kind="clause" if "." in code else "section")
     assert [s.code for s in model.sections()] == ["03 30 00", "31 23 00", "4.28.2", "4.28.10"]
+
+
+def test_relation_style_persists_keep_and_reset(model, spy, tmp_path):
+    a = model.add_section("A", "Alpha")
+    b = model.add_section("B", "Beta")
+    rel = model.add_relation(a.id, UiKind.REFERENCES, b.id)
+    updated = spy(model.relationUpdated)
+    styled = model.set_relation_style(rel.id, color="#c00000")
+    assert styled.style == ("#C00000", "solid", None) and styled.has_custom_style
+    assert len(updated) == 1
+    model.set_relation_style(rel.id, color="#C00000")           # sin cambio: sin señal
+    assert len(updated) == 1
+    model.set_relation_style(rel.id, dash="dash", width=2.5)     # color se conserva (KEEP)
+    assert model.relation(rel.id).style == ("#C00000", "dash", 2.5)
+    inverted = model.invert_relation(rel.id)                     # invertir conserva el estilo
+    assert inverted.style == ("#C00000", "dash", 2.5)
+    with pytest.raises(ValueError):
+        model.set_relation_style(rel.id, dash="wavy")
+    with pytest.raises(ValueError):
+        model.set_relation_style(rel.id, width=20)
+    with pytest.raises(ValueError):
+        model.set_relation_style(rel.id, color="rojo")
+    model.reset_relation_style(rel.id)
+    assert model.relation(rel.id).style == (None, "solid", None)
+    other = model.add_relation(a.id, UiKind.REFERENCES, model.add_section("C").id)
+    model.set_relations_style([rel.id, other.id, 9999], dash="dot")
+    assert model.relation(rel.id).line_dash == "dot" and model.relation(other.id).line_dash == "dot"
+
+
+def test_relation_style_survives_reopen(tmp_path, qcore_app):
+    from models.project_model import ProjectModel
+
+    path = tmp_path / "estilo.specrel"
+    m = ProjectModel()
+    m.new_project(path, "CC-1", "Demo")
+    a, b = m.add_section("A"), m.add_section("B")
+    rel = m.add_relation(a.id, UiKind.REFERENCES, b.id)
+    m.set_relation_style(rel.id, color="#548235", dash="dashdot", width=4.0)
+    m.close()
+    m2 = ProjectModel()
+    m2.open_project(path)
+    assert m2.relations()[0].style == ("#548235", "dashdot", 4.0)
+    m2.close()

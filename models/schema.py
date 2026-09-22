@@ -5,7 +5,7 @@ import re
 import sqlite3
 from typing import Callable
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 HEX_COLOR_CHECK = "GLOB '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'"
 
@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS relations (
     target_port TEXT CHECK (target_port IS NULL OR target_port IN ('top','right','bottom','left')),
     notes       TEXT,
     created_at  TEXT NOT NULL,
+    line_color  TEXT CHECK (line_color IS NULL OR line_color {HEX_COLOR_CHECK}),
+    line_dash   TEXT NOT NULL DEFAULT 'solid' CHECK (line_dash IN ('solid', 'dash', 'dot', 'dashdot')),
+    line_width  REAL CHECK (line_width IS NULL OR line_width BETWEEN 0.5 AND 8),
     CHECK (source_id <> target_id)
 );
 -- Una relación por par DIRIGIDO: A→B y B→A son dos flechas distintas.
@@ -207,5 +210,12 @@ MIGRATIONS: dict[int, list[str | Callable[[sqlite3.Connection], None]]] = {
     5: [
         "ALTER TABLE sections ADD COLUMN kind TEXT NOT NULL DEFAULT 'section' CHECK (kind IN ('section', 'clause'))",
         migrate_v5_keys_and_clauses,
+    ],
+    # v6: estilo propio por flecha (color, trazo, grosor). NULL / 'solid' = predeterminado.
+    6: [
+        f"ALTER TABLE relations ADD COLUMN line_color TEXT CHECK (line_color IS NULL OR line_color {HEX_COLOR_CHECK})",
+        "ALTER TABLE relations ADD COLUMN line_dash TEXT NOT NULL DEFAULT 'solid' "
+        "CHECK (line_dash IN ('solid', 'dash', 'dot', 'dashdot'))",
+        "ALTER TABLE relations ADD COLUMN line_width REAL CHECK (line_width IS NULL OR line_width BETWEEN 0.5 AND 8)",
     ],
 }

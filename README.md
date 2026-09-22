@@ -18,6 +18,17 @@ relaciones entre secciones de especificaciones tipo MasterFormat de un proyecto.
 - **Crear el mapa desde Excel/CSV**: arrastre la plantilla sobre la ventana (o «Abrir con… SpecRel») y el
   proyecto `.specrel` se crea junto al Excel con las secciones acomodadas automáticamente.
 
+## Novedades 0.4.1 (beta)
+
+- **Estilo propio por flecha**: color (paleta de 8 + personalizado), trazo (continua, discontinua, punteada,
+  punto y raya) y grosor (Fina, Normal, Gruesa, Muy gruesa). Clic derecho en la flecha → *Estilo de la flecha*
+  (con varias seleccionadas se aplica a todas) o *Estilo de línea…* con vista previa; *Restablecer estilo*.
+  La selección oscurece el color propio; el rojo del análisis prevalece. La tabla de relaciones muestra una
+  muestra de la línea; la vista 3D refleja solo el color. Esquema v6 (`line_color`, `line_dash`, `line_width`).
+- Plantilla Excel: columnas opcionales **Color | Trazo | Grosor** en la hoja Relaciones (vacías = predeterminado);
+  exportar tablas las escribe y reimportar las conserva.
+- Las observaciones de una relación ahora sí aparecen en el tooltip de la flecha.
+
 ## Novedades 0.4.0 (beta)
 
 - **Nodo «Cláusula»**: las cláusulas del pliego de cargos (`4.28.N`) y sus subcláusulas (`4.28.N.M`) son un tipo

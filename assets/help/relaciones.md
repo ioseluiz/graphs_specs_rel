@@ -72,3 +72,22 @@ una de las dos o selecciónela desde el mismo menú.
 - Seleccionar una fila resalta la flecha en el mapa, y seleccionar una flecha o nodo resalta sus filas.
 - Las **observaciones** de una relación (columna Observaciones de la plantilla) se muestran al pasar el mouse
   sobre la flecha.
+
+## Estilo de la flecha
+
+Cada flecha puede tener **color, trazo y grosor** propios, como en otras aplicaciones de diagramas. Clic derecho
+sobre la flecha → **Estilo de la flecha**:
+
+- **Color**: paleta de ocho colores, *Personalizar…* (cualquier color) o *Color predeterminado* (azul).
+- **Trazo**: continua, discontinua, punteada o punto y raya. La punta de la flecha siempre es sólida.
+- **Grosor**: Fina (1 px), Normal (1,6 px), Gruesa (2,5 px) o Muy gruesa (4 px).
+- **Estilo de línea…** abre un cuadro con los tres controles y una vista previa.
+- **Restablecer estilo** vuelve al estilo predeterminado.
+
+Si selecciona varias flechas (Ctrl + clic o arrastre de selección) y hace clic derecho sobre una de ellas, el
+submenú dice «Estilo de las N flechas seleccionadas» y el cambio se aplica a todas.
+
+Al seleccionar una flecha con color propio, el color se oscurece y aparece el halo; el resaltado rojo del
+Análisis de impacto prevalece sobre cualquier estilo. La tabla *Relaciones registradas* muestra una muestra de
+la línea entre los códigos A y B. La vista 3D refleja solo el color. El estilo se exporta en PNG/SVG y viaja por la
+plantilla Excel en las columnas opcionales **Color | Trazo | Grosor** de la hoja Relaciones.

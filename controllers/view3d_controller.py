@@ -36,6 +36,7 @@ class View3DController(QObject):
         project.projectClosed.connect(self._on_closed)
         project.graphChanged.connect(self._mark_dirty)
         project.sectionUpdated.connect(lambda _sid: self._mark_dirty())
+        project.relationUpdated.connect(lambda _rid: self._mark_dirty())   # color propio de la flecha
         project.categoriesChanged.connect(self._mark_dirty)
         window.tabs.currentChanged.connect(self._on_tab_changed)
         self.widget.recalcRequested.connect(self.recalculate)
@@ -161,13 +162,15 @@ class View3DController(QObject):
         edges: list[tuple[int, int]] = []
         directed = {(r.source_id, r.target_id) for r in self.project.relations()}
         paired: list[bool] = []   # True si también existe la flecha inversa (se dibujan separadas)
+        edge_colors: list[str] = []
         for rel in self.project.relations():
             if rel.source_id in index and rel.target_id in index:
                 edges.append((index[rel.source_id], index[rel.target_id]))
                 paired.append((rel.target_id, rel.source_id) in directed)
+                edge_colors.append(rel.line_color or palette.EDGE_COLOR)
         degrees = [self.project.graph.G.degree(sid) if sid in self.project.graph.G else 0 for sid in ids]
         self.widget.set_graph(
             ids, pos, fills,
             np.array(edges, dtype=np.int32).reshape(-1, 2), np.array(paired, dtype=bool),
-            labels, degrees,
+            labels, degrees, edge_colors=edge_colors,
         )

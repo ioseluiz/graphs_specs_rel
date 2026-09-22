@@ -85,7 +85,7 @@ def test_migration_v3_to_v4_splits_mutual_into_two_arrows(tmp_path):
     conn.close()
 
     db = ProjectDatabase.open(path)
-    assert db.schema_version() == SCHEMA_VERSION == 5
+    assert db.schema_version() == SCHEMA_VERSION == 6
     rels = sorted(RelationRepo(db).all(), key=lambda r: r.id)
     assert [(r.source_id, r.target_id, r.kind) for r in rels] == [(1, 2, RelationKind.REF), (2, 1, RelationKind.REF)]
     original, inverse = rels
@@ -201,7 +201,7 @@ def test_migration_v4_to_v5_recalculates_keys_and_marks_clauses(tmp_path):
     conn.close()
 
     db = ProjectDatabase.open(path)
-    assert db.schema_version() == 5
+    assert db.schema_version() == SCHEMA_VERSION
     secs = {s.code: s for s in SectionRepo(db).all()}
     clause, plain = secs["4.28.3.1"], secs["31 23 00"]
     assert clause.code_key == "4.28.3.1" and clause.kind == "clause"
@@ -212,4 +212,38 @@ def test_migration_v4_to_v5_recalculates_keys_and_marks_clauses(tmp_path):
     assert (cats["Otra"].fill_color, cats["Otra"].border_color) == ("#EDEDED", "#8C8C8C")
     assert plain.kind == "section" and plain.status_id == 1 and plain.progress == 30 and plain.code_key == "312300"
     assert db.conn.execute("SELECT code_key FROM catalog").fetchone()[0] == "4.28.33"
+    db.close()
+
+
+def test_migration_v5_to_v6_adds_line_style_defaults(tmp_path):
+    from models.schema import SCHEMA_SQL
+
+    v5_sql = "\n".join(line for line in SCHEMA_SQL.splitlines()
+                       if not any(tag in line for tag in ("line_color", "line_dash", "line_width")))
+    assert "line_dash" not in v5_sql
+    path = tmp_path / "v5.specrel"
+    conn = sqlite3.connect(path)
+    conn.executescript(v5_sql)
+    conn.execute("PRAGMA user_version = 5")
+    conn.execute("INSERT INTO project (id, code, name, created_at, updated_at, app_version) "
+                 "VALUES (1, 'X', 'Y', 'now', 'now', '0.4.0')")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, created_at, updated_at) "
+                 "VALUES (1, '03 30 00', '033000', 'Concreto', 'now', 'now')")
+    conn.execute("INSERT INTO sections (id, code, code_key, title, created_at, updated_at) "
+                 "VALUES (2, '31 23 00', '312300', 'Excavación', 'now', 'now')")
+    conn.execute("INSERT INTO relations (source_id, target_id, kind, notes, created_at) VALUES (1, 2, 'ref', 'n', 'now')")
+    conn.commit()
+    conn.close()
+
+    db = ProjectDatabase.open(path)
+    assert db.schema_version() == 6
+    rels = RelationRepo(db)
+    rel = rels.all()[0]
+    assert (rel.line_color, rel.line_dash, rel.line_width) == (None, "solid", None) and not rel.has_custom_style
+    rels.update_style(rel.id, "#C00000", "dash", 2.5)
+    rel = rels.get(rel.id)
+    assert rel.style == ("#C00000", "dash", 2.5) and rel.has_custom_style
+    for bad in (("rojo", "solid", None), ("#C00000", "wavy", None), (None, "solid", 9.0)):
+        with pytest.raises(sqlite3.IntegrityError):
+            rels.update_style(rel.id, *bad)
     db.close()
